@@ -8,6 +8,9 @@ import com.gridifymydungeon.plugin.gridmove.CollisionDetector;
 import com.gridifymydungeon.plugin.gridmove.GridMoveManager;
 import com.gridifymydungeon.plugin.gridmove.GridOverlayManager;
 import com.gridifymydungeon.plugin.gridmove.GridPlayerState;
+import com.gridifymydungeon.plugin.spell.SpellCastingState;
+import com.gridifymydungeon.plugin.spell.SpellPatternCalculator;
+import com.gridifymydungeon.plugin.spell.SpellVisualManager;
 import com.hypixel.hytale.math.vector.Vector3d;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.world.World;
@@ -34,6 +37,13 @@ public class PlayerPositionTracker {
 
     private final Map<PlayerRef, Long> lastMoveTime = new HashMap<>();
     private final AtomicBoolean movePending = new AtomicBoolean(false);
+
+    // Injected after construction (to avoid circular dependency)
+    private SpellVisualManager spellVisualManager = null;
+
+    public void setSpellVisualManager(SpellVisualManager svm) {
+        this.spellVisualManager = svm;
+    }
 
     public PlayerPositionTracker(GridMoveManager gridMoveManager, RoleManager roleManager,
                                  EncounterManager encounterManager, CombatManager combatManager,
@@ -66,9 +76,54 @@ public class PlayerPositionTracker {
         int newGridX = newGrid[0];
         int newGridZ = newGrid[1];
 
-        if (state.isFrozen && newGridX == state.currentGridX && newGridZ == state.currentGridZ) {
+        // Auto-unfreeze only applies to collision-freeze, NOT spell-casting freeze.
+        boolean isCasting = state.getSpellCastingState() != null && state.getSpellCastingState().isValid();
+        if (!isCasting && state.isFrozen && newGridX == state.currentGridX && newGridZ == state.currentGridZ) {
             state.unfreeze();
             playerRef.sendMessage(com.hypixel.hytale.server.core.Message.raw("[GridMove] NPC unfrozen!"));
+        }
+
+        // While casting: update aim and move the spell indicator, OR cancel if out of range.
+        if (isCasting && spellVisualManager != null) {
+            com.gridifymydungeon.plugin.spell.SpellCastingState castState = state.getSpellCastingState();
+            if (castState != null && (castState.getAimGridX() != newGridX || castState.getAimGridZ() != newGridZ)) {
+                int distFromCaster = com.gridifymydungeon.plugin.spell.SpellPatternCalculator.getDistance(
+                        castState.getCasterGridX(), castState.getCasterGridZ(), newGridX, newGridZ);
+                int spellRange = castState.getSpell().getRangeGrids();
+
+                if (spellRange > 0 && distFromCaster > spellRange) {
+                    // Out of range — cancel spell and clear the red grid immediately
+                    state.clearSpellCastingState();
+                    state.unfreeze();
+                    world.execute(() -> spellVisualManager.clearSpellVisuals(playerRef.getUuid(), world));
+                    playerRef.sendMessage(com.hypixel.hytale.server.core.Message.raw(
+                            "[Griddify] Out of range — spell cancelled!").color("#FF0000"));
+                } else {
+                    // Still in range — update aim and refresh the indicator
+                    castState.updateAim(newGridX, newGridZ);
+                    final int aimX = newGridX;
+                    final int aimZ = newGridZ;
+                    final float aimY = (float) newPosition.getY();
+                    final com.gridifymydungeon.plugin.spell.SpellPattern pattern = castState.getSpell().getPattern();
+                    final com.gridifymydungeon.plugin.spell.Direction8 dir = castState.getDirection();
+                    spellRange = castState.getSpell().getRangeGrids();
+                    final int areaGrids = castState.getSpell().getAreaGrids();
+                    int finalSpellRange = spellRange;
+                    world.execute(() -> {
+                        java.util.Set<SpellPatternCalculator.GridCell> cells;
+                        if (pattern == com.gridifymydungeon.plugin.spell.SpellPattern.SINGLE_TARGET) {
+                            // Single cell follows the player
+                            cells = new java.util.HashSet<>();
+                            cells.add(new SpellPatternCalculator.GridCell(aimX, aimZ));
+                        } else {
+                            // Area spells: show full pattern preview centred on the aimed cell
+                            cells = SpellPatternCalculator.calculatePattern(
+                                    pattern, dir, aimX, aimZ, finalSpellRange, areaGrids);
+                        }
+                        spellVisualManager.showSpellArea(playerRef.getUuid(), cells, world, aimY);
+                    });
+                }
+            }
         }
 
         if (newGridX != state.currentGridX || newGridZ != state.currentGridZ) {
@@ -119,6 +174,13 @@ public class PlayerPositionTracker {
 
     private void handleGridMovement(PlayerRef playerRef, GridPlayerState state,
                                     int newGridX, int newGridZ, double playerY, World world) {
+
+        // During spell casting: NPC stays frozen, only the spell indicator moves (handled above)
+        SpellCastingState castState = state.getSpellCastingState();
+        if (castState != null && castState.isValid()) {
+            // Don't move the NPC — just silently return; spell indicator already updated above
+            return;
+        }
 
         if (state.isFrozen) {
             playerRef.sendMessage(com.hypixel.hytale.server.core.Message.raw(

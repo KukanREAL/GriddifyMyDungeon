@@ -51,7 +51,7 @@ public class GridClassesCommand extends AbstractPlayerCommand {
 
         playerRef.sendMessage(Message.raw("=========================================").color("#FFD700"));
         playerRef.sendMessage(Message.raw("Use: /GridClass <name> to apply").color("#90EE90"));
-        playerRef.sendMessage(Message.raw("Example: /GridClass Warrior").color("#FFFFFF"));
+        playerRef.sendMessage(Message.raw("Example: /GridClass Fighter").color("#FFFFFF"));
         playerRef.sendMessage(Message.raw(""));
 
         System.out.println("[Griddify] [PRESETS] " + playerRef.getUsername() + " viewed presets list");

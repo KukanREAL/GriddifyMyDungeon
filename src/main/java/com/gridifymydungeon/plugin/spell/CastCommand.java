@@ -1,7 +1,6 @@
 package com.gridifymydungeon.plugin.spell;
 
 import com.gridifymydungeon.plugin.dnd.EncounterManager;
-import com.gridifymydungeon.plugin.dnd.MonsterState;
 import com.gridifymydungeon.plugin.gridmove.GridMoveManager;
 import com.gridifymydungeon.plugin.gridmove.GridPlayerState;
 import com.hypixel.hytale.component.Ref;
@@ -16,13 +15,17 @@ import com.hypixel.hytale.server.core.universe.world.World;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 
 import javax.annotation.Nonnull;
-import java.util.List;
 import java.util.Set;
 
 /**
- * /Cast <spell name> - Show spell range and prepare casting
- * Player must be targeting a monster (standing next to it)
- * UPDATED: Supports both base class spells (level 1+) and subclass spells (level 3+)
+ * /Cast <spell name>
+ *
+ * Behaviour by pattern:
+ *
+ *   SELF / AURA     - Fires immediately on the NPC, no aiming needed.
+ *   CONE / LINE     - Direction locked from player facing, fires immediately from NPC.
+ *   SINGLE_TARGET   - NPC freezes. Red cell follows player body. /CastFinal fires on that cell.
+ *   SPHERE/CUBE/etc - NPC freezes. Full area preview follows player body as aim point. /CastFinal fires there.
  */
 public class CastCommand extends AbstractPlayerCommand {
     private final GridMoveManager playerManager;
@@ -32,7 +35,7 @@ public class CastCommand extends AbstractPlayerCommand {
 
     public CastCommand(GridMoveManager playerManager, EncounterManager encounterManager,
                        SpellVisualManager visualManager) {
-        super("Cast", "Prepare to cast a spell (must target monster)");
+        super("Cast", "Prepare to cast a spell");
         this.playerManager = playerManager;
         this.encounterManager = encounterManager;
         this.visualManager = visualManager;
@@ -45,188 +48,137 @@ public class CastCommand extends AbstractPlayerCommand {
 
         GridPlayerState state = playerManager.getState(playerRef);
 
-        // Check if player has a class
         if (state.stats.getClassType() == null) {
             playerRef.sendMessage(Message.raw("[Griddify] Choose a class first! Use /GridClass").color("#FF0000"));
             return;
         }
+        if (state.npcEntity == null || !state.npcEntity.isValid()) {
+            playerRef.sendMessage(Message.raw("[Griddify] Enable grid movement first! Use /GridMove").color("#FF0000"));
+            return;
+        }
 
         String spellName = spellNameArg.get(context);
-
-        // Find spell
         SpellData spell = SpellDatabase.getSpell(spellName);
         if (spell == null) {
             playerRef.sendMessage(Message.raw("[Griddify] Unknown spell: " + spellName).color("#FF0000"));
             return;
         }
 
-        // NEW: Check spell access based on type
         if (!canAccessSpell(state, spell)) {
             if (spell.isSubclassSpell()) {
-                // Subclass spell - need correct subclass
-                if (state.stats.getSubclassType() == null) {
-                    playerRef.sendMessage(Message.raw("[Griddify] You need to choose a subclass first! (Level 3+ required)").color("#FF0000"));
-                } else {
-                    playerRef.sendMessage(Message.raw("[Griddify] You don't have access to this spell!").color("#FF0000"));
-                    playerRef.sendMessage(Message.raw("[Griddify] Your subclass: " +
-                            state.stats.getSubclassType().getDisplayName()).color("#FFA500"));
-                    playerRef.sendMessage(Message.raw("[Griddify] Required: " +
-                            spell.getSubclass().getDisplayName()).color("#FFA500"));
-                }
+                playerRef.sendMessage(Message.raw("[Griddify] Wrong subclass! Yours: " +
+                        (state.stats.getSubclassType() != null ? state.stats.getSubclassType().getDisplayName() : "none") +
+                        " | Required: " + spell.getSubclass().getDisplayName()).color("#FF0000"));
             } else {
-                // Base class spell - need correct class
-                playerRef.sendMessage(Message.raw("[Griddify] You don't have access to this spell!").color("#FF0000"));
-                playerRef.sendMessage(Message.raw("[Griddify] Your class: " +
-                        state.stats.getClassType().getDisplayName()).color("#FFA500"));
-                playerRef.sendMessage(Message.raw("[Griddify] Required: " +
-                        spell.getClassType().getDisplayName()).color("#FFA500"));
+                playerRef.sendMessage(Message.raw("[Griddify] Wrong class! Yours: " +
+                        state.stats.getClassType().getDisplayName() +
+                        " | Required: " + spell.getClassType().getDisplayName()).color("#FF0000"));
             }
             return;
         }
-
-        // Check level requirement
         if (spell.getMinLevel() > state.stats.getLevel()) {
             playerRef.sendMessage(Message.raw("[Griddify] Level " + spell.getMinLevel() +
                     " required (you are level " + state.stats.getLevel() + ")").color("#FF0000"));
             return;
         }
-
-        // Check spell slots
         int cost = spell.getSlotCost();
         if (state.stats.getRemainingSpellSlots() < cost) {
-            playerRef.sendMessage(Message.raw("[Griddify] Not enough spell slots!").color("#FF0000"));
-            playerRef.sendMessage(Message.raw("[Griddify] Cost: " + cost + " | Remaining: " +
-                    state.stats.getRemainingSpellSlots()).color("#FFA500"));
+            playerRef.sendMessage(Message.raw("[Griddify] Not enough spell slots! Cost: " + cost +
+                    " | Remaining: " + state.stats.getRemainingSpellSlots()).color("#FF0000"));
             return;
         }
 
-        // Find target monster (must be adjacent)
-        MonsterState targetMonster = findAdjacentMonster(playerRef, world, state);
-        if (targetMonster == null) {
-            playerRef.sendMessage(Message.raw("[Griddify] Stand next to a monster to target it!").color("#FF0000"));
-            return;
-        }
+        int casterGridX = state.currentGridX;
+        int casterGridZ = state.currentGridZ;
 
-        // Get player position from grid coordinates
-        int playerGridX = state.currentGridX;
-        int playerGridZ = state.currentGridZ;
-
-        // Get monster position from grid coordinates
-        int monsterGridX = targetMonster.currentGridX;
-        int monsterGridZ = targetMonster.currentGridZ;
-
-        // Check if monster is within spell range
-        int distance = SpellPatternCalculator.getDistance(playerGridX, playerGridZ, monsterGridX, monsterGridZ);
-        if (distance > spell.getRangeGrids()) {
-            playerRef.sendMessage(Message.raw("[Griddify] Target out of range!").color("#FF0000"));
-            playerRef.sendMessage(Message.raw("[Griddify] Distance: " + distance + " grids | Max: " +
-                    spell.getRangeGrids() + " grids").color("#FFA500"));
-            return;
-        }
-
-        // Get player facing direction
         float yaw = 0.0f;
-        try {
-            yaw = playerRef.getTransform().getRotation().getY();
-        } catch (Exception e) {
-            System.out.println("[Griddify] [CAST] Could not get player yaw, using default");
-        }
+        try { yaw = playerRef.getTransform().getRotation().getY(); } catch (Exception ignored) {}
         Direction8 direction = Direction8.fromYaw(yaw);
 
-        // Calculate affected area
-        Set<SpellPatternCalculator.GridCell> affectedCells;
+        SpellPattern pattern = spell.getPattern();
 
-        if (spell.getPattern() == SpellPattern.CONE || spell.getPattern() == SpellPattern.LINE) {
-            // Cone/line emanates from caster
-            affectedCells = SpellPatternCalculator.calculatePattern(
-                    spell.getPattern(), direction, playerGridX, playerGridZ,
-                    spell.getRangeGrids(), spell.getAreaGrids()
-            );
-        } else {
-            // Other spells centered on target
-            affectedCells = SpellPatternCalculator.calculatePattern(
-                    spell.getPattern(), direction, monsterGridX, monsterGridZ,
-                    spell.getRangeGrids(), spell.getAreaGrids()
-            );
+        // --- Patterns that fire immediately (no aiming walk needed) ---
+        if (pattern == SpellPattern.SELF || pattern == SpellPattern.AURA) {
+            Set<SpellPatternCalculator.GridCell> cells = SpellPatternCalculator.calculatePattern(
+                    pattern, direction, casterGridX, casterGridZ,
+                    spell.getRangeGrids(), spell.getAreaGrids());
+            float playerY = getPlayerY(playerRef);
+            visualManager.showSpellArea(playerRef.getUuid(), cells, world, playerY);
+
+            // Save state with aim = caster (will fire immediately when /CastFinal is used,
+            // or player can just call /CastFinal right away)
+            state.setSpellCastingState(new SpellCastingState(spell, null, direction, casterGridX, casterGridZ));
+
+            String label = spellLabel(spell);
+            playerRef.sendMessage(Message.raw("[Griddify] " + label + " ready!").color("#FFD700"));
+            playerRef.sendMessage(Message.raw("[Griddify] Pattern: " + pattern.name() + " | Use /CastFinal to fire.").color("#87CEEB"));
+            return;
         }
 
-        // Show RED spell area
-        visualManager.showSpellArea(playerRef.getUuid(), affectedCells);
+        if (pattern == SpellPattern.CONE || pattern == SpellPattern.LINE) {
+            Set<SpellPatternCalculator.GridCell> cells = SpellPatternCalculator.calculatePattern(
+                    pattern, direction, casterGridX, casterGridZ,
+                    spell.getRangeGrids(), spell.getAreaGrids());
+            float playerY = getPlayerY(playerRef);
+            visualManager.showSpellArea(playerRef.getUuid(), cells, world, playerY);
 
-        // Save casting state
-        state.setSpellCastingState(new SpellCastingState(
-                spell, targetMonster, direction, playerGridX, playerGridZ
-        ));
+            state.setSpellCastingState(new SpellCastingState(spell, null, direction, casterGridX, casterGridZ));
 
-        // Display spell info
-        playerRef.sendMessage(Message.raw(""));
-        playerRef.sendMessage(Message.raw("===========================================").color("#FF0000"));
-
-        if (spell.isSubclassSpell()) {
-            playerRef.sendMessage(Message.raw("  SPELL READY: " + spell.getName() +
-                    " (" + spell.getSubclass().getDisplayName() + ")").color("#FFD700"));
-        } else {
-            playerRef.sendMessage(Message.raw("  SPELL READY: " + spell.getName() +
-                    " (" + spell.getClassType().getDisplayName() + ")").color("#FFD700"));
+            String label = spellLabel(spell);
+            playerRef.sendMessage(Message.raw("[Griddify] " + label + " ready!").color("#FFD700"));
+            playerRef.sendMessage(Message.raw("[Griddify] Direction: " + direction.name() + " | Use /CastFinal to fire.").color("#87CEEB"));
+            System.out.println("[Griddify] [CAST] " + playerRef.getUsername() + " preparing " +
+                    spell.getName() + " direction=" + direction.name());
+            return;
         }
 
-        playerRef.sendMessage(Message.raw("===========================================").color("#FF0000"));
-        playerRef.sendMessage(Message.raw("  Target: " + targetMonster.getDisplayName()).color("#FFFFFF"));
-        playerRef.sendMessage(Message.raw("  Range: " + distance + " / " + spell.getRangeGrids() + " grids").color("#87CEEB"));
-        playerRef.sendMessage(Message.raw("  Cost: " + cost + " spell slots").color("#FFA500"));
+        // --- Patterns that need aiming (SINGLE_TARGET, SPHERE, CUBE, CYLINDER, CHAIN, WALL) ---
+        state.freeze("casting");
 
+        // Initial indicator: single cell under caster for SINGLE_TARGET, full area preview for area spells
+        Set<SpellPatternCalculator.GridCell> initialCells;
+        if (pattern == SpellPattern.SINGLE_TARGET) {
+            initialCells = new java.util.HashSet<>();
+            initialCells.add(new SpellPatternCalculator.GridCell(casterGridX, casterGridZ));
+        } else {
+            // Area spell: show full area centred on caster as starting preview
+            initialCells = SpellPatternCalculator.calculatePattern(
+                    pattern, direction, casterGridX, casterGridZ,
+                    spell.getRangeGrids(), spell.getAreaGrids());
+        }
+
+        float playerY = getPlayerY(playerRef);
+        visualManager.showSpellArea(playerRef.getUuid(), initialCells, world, playerY);
+
+        state.setSpellCastingState(new SpellCastingState(spell, null, direction, casterGridX, casterGridZ));
+
+        String label = spellLabel(spell);
+        playerRef.sendMessage(Message.raw("[Griddify] CASTING: " + label).color("#FFD700"));
+        playerRef.sendMessage(Message.raw("[Griddify] NPC frozen at (" + casterGridX + ", " + casterGridZ + ")").color("#FF6347"));
+        playerRef.sendMessage(Message.raw("[Griddify] Range: " + spell.getRangeGrids() + " grids | Walk to aim").color("#87CEEB"));
         if (spell.getDamageDice() != null) {
-            playerRef.sendMessage(Message.raw("  Damage: " + spell.getDamageDice() + " " +
+            playerRef.sendMessage(Message.raw("[Griddify] Damage: " + spell.getDamageDice() + " " +
                     spell.getDamageType().name().toLowerCase()).color("#FF6B6B"));
+        } else {
+            playerRef.sendMessage(Message.raw("[Griddify] Effect: " + spell.getDescription()).color("#90EE90"));
         }
-
-        if (spell.isPersistent()) {
-            playerRef.sendMessage(Message.raw("  Duration: " + spell.getDurationTurns() + " turns").color("#9370DB"));
-        }
-
-        playerRef.sendMessage(Message.raw(""));
-        playerRef.sendMessage(Message.raw("  RED area shows spell effect!").color("#FF0000"));
-        playerRef.sendMessage(Message.raw("  Use /CastFinal to execute").color("#00FF00"));
-        playerRef.sendMessage(Message.raw("===========================================").color("#FF0000"));
+        playerRef.sendMessage(Message.raw("[Griddify] Use /CastFinal to fire | /CastCancel to abort").color("#00FF00"));
 
         System.out.println("[Griddify] [CAST] " + playerRef.getUsername() + " preparing " +
-                spell.getName() + " on " + targetMonster.getDisplayName());
+                spell.getName() + " NPC frozen at (" + casterGridX + ", " + casterGridZ + ")");
     }
 
-    /**
-     * Check if player can access this spell
-     * NEW: Handles both base class spells and subclass spells
-     */
+    private String spellLabel(SpellData spell) {
+        if (spell.isSubclassSpell()) return spell.getName() + " (" + spell.getSubclass().getDisplayName() + ")";
+        return spell.getName() + " (" + spell.getClassType().getDisplayName() + ")";
+    }
+
+    private float getPlayerY(PlayerRef playerRef) {
+        try { return (float) playerRef.getTransform().getPosition().getY(); } catch (Exception e) { return 0f; }
+    }
+
     private boolean canAccessSpell(GridPlayerState state, SpellData spell) {
-        if (spell.isSubclassSpell()) {
-            // Subclass spell - need exact subclass match
-            return spell.getSubclass() == state.stats.getSubclassType();
-        } else {
-            // Base class spell - need class match
-            return spell.getClassType() == state.stats.getClassType();
-        }
-    }
-
-    /**
-     * Find monster adjacent to player (within 1 grid)
-     */
-    private MonsterState findAdjacentMonster(PlayerRef playerRef, World world, GridPlayerState state) {
-        int playerGridX = state.currentGridX;
-        int playerGridZ = state.currentGridZ;
-
-        List<MonsterState> monsters = encounterManager.getMonsters();
-        for (MonsterState monster : monsters) {
-            if (!monster.isAlive()) continue;
-
-            int monsterGridX = monster.currentGridX;
-            int monsterGridZ = monster.currentGridZ;
-
-            int distance = SpellPatternCalculator.getDistance(playerGridX, playerGridZ, monsterGridX, monsterGridZ);
-            if (distance <= 1) {
-                return monster;
-            }
-        }
-
-        return null;
+        if (spell.isSubclassSpell()) return spell.getSubclass() == state.stats.getSubclassType();
+        return spell.getClassType() == state.stats.getClassType();
     }
 }

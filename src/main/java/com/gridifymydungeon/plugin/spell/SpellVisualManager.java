@@ -26,7 +26,6 @@ import java.util.*;
  * Uses same entity spawning pattern as GridOverlayManager
  */
 public class SpellVisualManager {
-    private final World world;
     private final GridMoveManager gridManager;
 
     // Track spawned spell visualization entities per player UUID
@@ -53,8 +52,7 @@ public class SpellVisualManager {
             0f,                             // SE: 0°
     };
 
-    public SpellVisualManager(World world, GridMoveManager gridManager) {
-        this.world = world;
+    public SpellVisualManager(GridMoveManager gridManager) {
         this.gridManager = gridManager;
     }
 
@@ -64,15 +62,29 @@ public class SpellVisualManager {
      * @param playerUUID Player casting spell
      * @param cells Grid cells to highlight
      */
-    public void showSpellArea(UUID playerUUID, Set<SpellPatternCalculator.GridCell> cells) {
+    public void showSpellArea(UUID playerUUID, Set<SpellPatternCalculator.GridCell> cells, World world, float playerY) {
         // Clear existing visuals
-        clearSpellVisuals(playerUUID);
+        clearSpellVisuals(playerUUID, world);
 
         Model model = getSpellModel();
         if (model == null) {
             System.err.println("[Griddify] [SPELL] Failed to load spell visualization model!");
             return;
         }
+
+        // Use player's actual Y as reference for ground scanning, same as GridOverlayManager.
+        // Fall back to npcY from state if playerY is 0 (uninitialized).
+        float referenceY = playerY;
+        if (referenceY == 0.0f) {
+            for (Map.Entry<UUID, com.gridifymydungeon.plugin.gridmove.GridPlayerState> entry : gridManager.getStateEntries()) {
+                if (entry.getKey().equals(playerUUID)) {
+                    float stateY = entry.getValue().npcY;
+                    if (stateY != 0.0f) referenceY = stateY;
+                    break;
+                }
+            }
+        }
+        if (referenceY == 0.0f) referenceY = 64.0f; // last-resort fallback
 
         List<Ref<EntityStore>> newVisuals = new ArrayList<>();
         Store<EntityStore> store = world.getEntityStore().getStore();
@@ -82,10 +94,10 @@ public class SpellVisualManager {
             float centerX = (cell.x * 2.0f) + 1.0f;
             float centerZ = (cell.z * 2.0f) + 1.0f;
 
-            // Get ground height using MonsterEntityController's scan method
-            Float groundY = MonsterEntityController.scanForGroundPublic(world, cell.x, cell.z, 100.0f);
+            // Scan for ground using player's actual Y as reference (matching GridOverlayManager)
+            Float groundY = MonsterEntityController.scanForGroundPublic(world, cell.x, cell.z, referenceY);
             if (groundY == null) {
-                groundY = 64.0f; // Fallback height
+                groundY = referenceY; // Fallback to player height
             }
             float y = groundY + 0.01f;
 
@@ -135,7 +147,7 @@ public class SpellVisualManager {
     /**
      * Clear spell visuals for a player
      */
-    public void clearSpellVisuals(UUID playerUUID) {
+    public void clearSpellVisuals(UUID playerUUID, World world) {
         List<Ref<EntityStore>> visuals = playerSpellVisuals.get(playerUUID);
         if (visuals != null) {
             Store<EntityStore> store = world.getEntityStore().getStore();
@@ -157,9 +169,9 @@ public class SpellVisualManager {
     /**
      * Clear all spell visuals (for cleanup)
      */
-    public void clearAllSpellVisuals() {
+    public void clearAllSpellVisuals(World world) {
         for (UUID playerUUID : new HashSet<>(playerSpellVisuals.keySet())) {
-            clearSpellVisuals(playerUUID);
+            clearSpellVisuals(playerUUID, world);
         }
     }
 

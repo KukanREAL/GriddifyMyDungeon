@@ -33,16 +33,16 @@ public class CharacterPresets {
     private static final Map<String, Preset> PRESETS = new HashMap<>();
 
     static {
-        // Warrior - High STR, CON. Low INT, CHA
-        PRESETS.put("warrior", new Preset(
-                "Warrior",
+        // Fighter - High STR, CON. Low INT, CHA
+        PRESETS.put("fighter", new Preset(
+                "Fighter",
                 16, 12, 14, 8, 10, 8,
                 20, 16, 1  // HP, Armor, Initiative
         ));
 
-        // Mage - High INT. Low STR, CON
-        PRESETS.put("mage", new Preset(
-                "Mage",
+        // Wizard - High INT. Low STR, CON
+        PRESETS.put("wizard", new Preset(
+                "Wizard",
                 8, 12, 10, 16, 14, 10,
                 12, 11, 1
         ));

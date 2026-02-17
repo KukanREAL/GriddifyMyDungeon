@@ -14,7 +14,6 @@ import com.hypixel.hytale.server.core.io.adapter.PacketWatcher;
 import com.hypixel.hytale.server.core.io.handlers.game.GamePacketHandler;
 import com.hypixel.hytale.server.core.plugin.JavaPlugin;
 import com.hypixel.hytale.server.core.plugin.JavaPluginInit;
-import com.hypixel.hytale.server.core.universe.Universe;
 
 import javax.annotation.Nonnull;
 import java.util.logging.Level;
@@ -180,15 +179,16 @@ public class GridMovePlugin extends JavaPlugin {
         getCommandRegistry().registerCommand(new GridClassCommand(gridMoveManager, roleManager, encounterManager));
         getCommandRegistry().registerCommand(new GridSubclassCommand(gridMoveManager));
 
-        // FIXED: Spell system - get world from Universe, create managers properly
-        SpellVisualManager spellVisualManager = new SpellVisualManager(
-                Universe.get().getDefaultWorld(), gridMoveManager);
+        // FIXED: SpellVisualManager now receives world at call time (not at init), avoiding null world on startup
+        SpellVisualManager spellVisualManager = new SpellVisualManager(gridMoveManager);
+        positionTracker.setSpellVisualManager(spellVisualManager);
         PersistentSpellManager persistentSpellManager = new PersistentSpellManager();
 
         // Spell casting commands - FIXED: Removed extra arguments
         getCommandRegistry().registerCommand(new ListSpellsCommand(gridMoveManager));
         getCommandRegistry().registerCommand(new CastCommand(gridMoveManager, encounterManager, spellVisualManager));
         getCommandRegistry().registerCommand(new CastFinalCommand(gridMoveManager, encounterManager, spellVisualManager, combatSettings));
+        getCommandRegistry().registerCommand(new CastCancelCommand(gridMoveManager, spellVisualManager));
 
         // Help command
         getCommandRegistry().registerCommand(new GridHelpCommand(roleManager));

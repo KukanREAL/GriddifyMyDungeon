@@ -4,8 +4,6 @@ package com.gridifymydungeon.plugin.spell;
  * 12 D&D base classes
  */
 public enum ClassType {
-    WARRIOR("Warrior", "STR"),
-    MAGE("Mage", "INT"),
     ROGUE("Rogue", "DEX"),
     CLERIC("Cleric", "WIS"),
     BARD("Bard", "CHA"),
@@ -34,6 +32,6 @@ public enum ClassType {
      * Does this class have spellcasting?
      */
     public boolean isSpellcaster() {
-        return this != WARRIOR && this != BARBARIAN && this != ROGUE && this != FIGHTER && this != MONK;
+        return this != BARBARIAN && this != ROGUE && this != FIGHTER && this != MONK;
     }
 }

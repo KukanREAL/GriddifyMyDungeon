@@ -24,12 +24,10 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * /CastFinal - Execute prepared spell
- * FIXED: Use grid coordinates instead of entity positions
- * TODO FUTURE: Implement saving throws (DEX/WIS/CON saves vs spell DC)
- * TODO FUTURE: Implement status effects (frightened, paralyzed, charmed, etc.)
- * TODO FUTURE: Implement concentration mechanics
- * TODO FUTURE: Implement smart targeting (exclude allies option)
+ * /CastFinal - Execute the prepared spell.
+ * Resolves target from the player's CURRENT real-world position (used to aim while NPC was frozen).
+ * Verifies the aimed cell is within range of the FROZEN NPC position.
+ * Unfreezes the NPC after casting.
  */
 public class CastFinalCommand extends AbstractPlayerCommand {
     private final GridMoveManager playerManager;
@@ -52,7 +50,7 @@ public class CastFinalCommand extends AbstractPlayerCommand {
 
         GridPlayerState state = playerManager.getState(playerRef);
 
-        // Check if player has a spell prepared
+        // Must have a spell prepared
         SpellCastingState castState = state.getSpellCastingState();
         if (castState == null || !castState.isValid()) {
             playerRef.sendMessage(Message.raw("[Griddify] No spell prepared! Use /Cast first").color("#FF0000"));
@@ -60,151 +58,142 @@ public class CastFinalCommand extends AbstractPlayerCommand {
         }
 
         SpellData spell = castState.getSpell();
-        MonsterState targetMonster = castState.getTargetMonster();
 
-        // Check if target is still alive
-        if (!targetMonster.isAlive()) {
-            playerRef.sendMessage(Message.raw("[Griddify] Target is already dead!").color("#FF0000"));
-            state.clearSpellCastingState();
-            visualManager.clearSpellVisuals(playerRef.getUuid());
-            return;
-        }
+        // --- Resolve target from aim position ---
+        // aimGridX/Z is updated by PlayerPositionTracker each time the player walks while casting.
+        // state.currentGridX/Z is the FROZEN NPC position — don't use that for aiming.
+        int aimGridX = castState.getAimGridX();
+        int aimGridZ = castState.getAimGridZ();
 
-        // FIXED: Check if player moved too far from original position using grid coords
-        int currentGridX = state.currentGridX;
-        int currentGridZ = state.currentGridZ;
-        int distanceMoved = SpellPatternCalculator.getDistance(
+        // Verify the aimed cell is within spell range of the FROZEN NPC
+        int distanceFromCaster = SpellPatternCalculator.getDistance(
                 castState.getCasterGridX(), castState.getCasterGridZ(),
-                currentGridX, currentGridZ
+                aimGridX, aimGridZ
         );
 
-        if (distanceMoved > spell.getRangeGrids()) {
-            playerRef.sendMessage(Message.raw("[Griddify] You moved too far! Spell cancelled").color("#FF0000"));
-            state.clearSpellCastingState();
-            visualManager.clearSpellVisuals(playerRef.getUuid());
+        if (distanceFromCaster > spell.getRangeGrids() && spell.getRangeGrids() > 0) {
+            playerRef.sendMessage(Message.raw("[Griddify] Out of range! You aimed " + distanceFromCaster +
+                    " grids away but range is " + spell.getRangeGrids() + " grids").color("#FF0000"));
+            playerRef.sendMessage(Message.raw("[Griddify] Walk closer to a monster and try again!").color("#FFA500"));
             return;
         }
 
-        // Consume spell slots
+        // Commit: unfreeze NPC, consume slot, calculate affected area.
+        state.unfreeze();
+
         int cost = spell.getSlotCost();
         if (!state.stats.consumeSpellSlot(cost)) {
             playerRef.sendMessage(Message.raw("[Griddify] Not enough spell slots!").color("#FF0000"));
+            state.clearSpellCastingState();
+            visualManager.clearSpellVisuals(playerRef.getUuid(), world);
             return;
         }
 
-        // FIXED: Calculate affected area using grid coordinates
-        int monsterGridX = targetMonster.currentGridX;
-        int monsterGridZ = targetMonster.currentGridZ;
+        SpellPattern pattern = spell.getPattern();
 
+        // Calculate affected cells based on pattern type:
+        //   NPC-origin patterns (SELF, AURA, CONE, LINE): always fire from the frozen NPC cell.
+        //   Targeted patterns (SINGLE_TARGET, SPHERE, CUBE, etc.): fire centred on the aimed cell.
         Set<SpellPatternCalculator.GridCell> affectedCells;
-        if (spell.getPattern() == SpellPattern.CONE || spell.getPattern() == SpellPattern.LINE) {
-            affectedCells = SpellPatternCalculator.calculatePattern(
-                    spell.getPattern(), castState.getDirection(),
-                    castState.getCasterGridX(), castState.getCasterGridZ(),
-                    spell.getRangeGrids(), spell.getAreaGrids()
-            );
-        } else {
-            affectedCells = SpellPatternCalculator.calculatePattern(
-                    spell.getPattern(), castState.getDirection(),
-                    monsterGridX, monsterGridZ,
-                    spell.getRangeGrids(), spell.getAreaGrids()
-            );
+        switch (pattern) {
+            case SELF:
+            case AURA:
+                // Centred on the caster NPC, aiming irrelevant
+                affectedCells = SpellPatternCalculator.calculatePattern(
+                        pattern, castState.getDirection(),
+                        castState.getCasterGridX(), castState.getCasterGridZ(),
+                        spell.getRangeGrids(), spell.getAreaGrids());
+                break;
+            case CONE:
+            case LINE:
+                // Direction-locked from NPC, aiming irrelevant
+                affectedCells = SpellPatternCalculator.calculatePattern(
+                        pattern, castState.getDirection(),
+                        castState.getCasterGridX(), castState.getCasterGridZ(),
+                        spell.getRangeGrids(), spell.getAreaGrids());
+                break;
+            default:
+                // SINGLE_TARGET, SPHERE, CUBE, CYLINDER, CHAIN, WALL — centred on aimed cell
+                affectedCells = SpellPatternCalculator.calculatePattern(
+                        pattern, castState.getDirection(),
+                        aimGridX, aimGridZ,
+                        spell.getRangeGrids(), spell.getAreaGrids());
+                break;
         }
 
-        // Calculate damage (if spell deals damage)
+        // --- Calculate damage ---
         int totalDamage = 0;
         if (spell.getDamageDice() != null && !spell.getDamageDice().isEmpty()) {
             totalDamage = rollDamage(spell.getDamageDice());
-
-            // Add spellcasting modifier
             totalDamage += state.stats.getSpellcastingModifier();
+            if (totalDamage < 0) totalDamage = 0; // damage can't go negative
         }
 
-        // Apply damage to ALL monsters in affected area (including allies - friendly fire!)
+        // --- Apply to all monsters in affected area ---
         int monstersHit = 0;
         List<MonsterState> allMonsters = encounterManager.getMonsters();
-
         for (MonsterState monster : allMonsters) {
             if (!monster.isAlive()) continue;
-
-            // FIXED: Use monster grid coordinates
-            int mGridX = monster.currentGridX;
-            int mGridZ = monster.currentGridZ;
-
-            // Check if monster is in affected area
-            if (affectedCells.contains(new SpellPatternCalculator.GridCell(mGridX, mGridZ))) {
+            if (affectedCells.contains(new SpellPatternCalculator.GridCell(monster.currentGridX, monster.currentGridZ))) {
+                monstersHit++;
                 if (totalDamage > 0) {
                     monster.takeDamage(totalDamage);
-                    monstersHit++;
                 }
+                // Non-damage spells still "hit" — effects go here
             }
         }
 
-        // If spell is persistent, add to persistent effect manager
+        // Persistent spell handling
         if (spell.isPersistent()) {
             PersistentSpellEffect persistentEffect = new PersistentSpellEffect(
-                    spell,
-                    playerRef,
-                    affectedCells,
-                    0 // TODO: Get current turn from combat manager
+                    spell, playerRef, affectedCells,
+                    0 // TODO: pass current turn from CombatManager
             );
-
-            // TODO: Pass persistent manager from constructor and add:
-            // persistentSpellManager.addEffect(persistentEffect);
-
+            // TODO: persistentSpellManager.addEffect(persistentEffect);
             playerRef.sendMessage(Message.raw("  Duration: " + spell.getDurationTurns() + " turns").color("#9370DB"));
         }
 
-        // Show dramatic spell cast event title
-        Message primaryTitle = Message.raw("✦ " + spell.getName().toUpperCase() + " ✦").color("#FF0000");
-        Message secondaryTitle = Message.raw(totalDamage + " " + spell.getDamageType().name() + " damage").color("#FFD700");
-
-        EventTitleUtil.showEventTitleToWorld(
-                primaryTitle,
-                secondaryTitle,
-                true, // Major event
-                null,
-                4.0f,
-                0.5f,
-                1.0f,
-                store
-        );
-
-        // Clear visuals
-        visualManager.clearSpellVisuals(playerRef.getUuid());
+        // Clear visuals and state
+        visualManager.clearSpellVisuals(playerRef.getUuid(), world);
         state.clearSpellCastingState();
 
-        // Notify player
-        Message primary = Message.raw("SPELL CAST!").color("#FFD700");
-        Message secondary = Message.raw(spell.getName() + " - " + monstersHit + " targets hit").color("#FFFFFF");
-        ItemWithAllMetadata icon = new ItemStack("Ingredient_Crystal_Yellow", 1).toPacket();
+        // --- Show world event title ---
+        String damageText = totalDamage > 0
+                ? totalDamage + " " + spell.getDamageType().name().toLowerCase() + " damage"
+                : spell.getDescription();
+        Message primaryTitle = Message.raw("[ " + spell.getName().toUpperCase() + " ]").color("#FF4500");
+        Message secondaryTitle = Message.raw(damageText).color("#FFD700");
+        EventTitleUtil.showEventTitleToWorld(primaryTitle, secondaryTitle, true, null, 4.0f, 0.5f, 1.0f, store);
 
-        NotificationUtil.sendNotification(
-                playerRef.getPacketHandler(),
-                primary,
-                secondary,
-                icon,
-                NotificationStyle.Default
-        );
+        // --- Player notification ---
+        Message primary = Message.raw("SPELL CAST!").color("#FFD700");
+        Message secondary = Message.raw(spell.getName() + " hit " + monstersHit + " target(s)").color("#FFFFFF");
+        ItemWithAllMetadata icon = new ItemStack("Ingredient_Crystal_Yellow", 1).toPacket();
+        NotificationUtil.sendNotification(playerRef.getPacketHandler(), primary, secondary, icon, NotificationStyle.Default);
 
         playerRef.sendMessage(Message.raw(""));
-        playerRef.sendMessage(Message.raw("  Damage: " + totalDamage + " " + spell.getDamageType().name()).color("#FF6B6B"));
-        playerRef.sendMessage(Message.raw("  Targets hit: " + monstersHit).color("#FFFFFF"));
+        playerRef.sendMessage(Message.raw("===========================================").color("#FFD700"));
+        playerRef.sendMessage(Message.raw("  " + spell.getName() + " -> (" + aimGridX + ", " + aimGridZ + ")").color("#FFD700"));
+        if (totalDamage > 0) {
+            playerRef.sendMessage(Message.raw("  Damage: " + totalDamage + " " + spell.getDamageType().name().toLowerCase()).color("#FF6B6B"));
+        } else {
+            playerRef.sendMessage(Message.raw("  Effect applied: " + spell.getDescription()).color("#90EE90"));
+        }
+        playerRef.sendMessage(Message.raw("  Monsters hit: " + monstersHit).color("#FFFFFF"));
         playerRef.sendMessage(Message.raw("  Spell slots remaining: " + state.stats.getRemainingSpellSlots()).color("#87CEEB"));
+        playerRef.sendMessage(Message.raw("===========================================").color("#FFD700"));
 
         System.out.println("[Griddify] [CASTFINAL] " + playerRef.getUsername() + " cast " +
                 spell.getName() + " for " + totalDamage + " damage (" + monstersHit + " targets)");
     }
 
-    /**
-     * Roll damage dice (e.g., "3d6" = roll 3 six-sided dice)
-     */
+
+
     private int rollDamage(String damageDice) {
         try {
             String[] parts = damageDice.split("d");
             int numDice = Integer.parseInt(parts[0]);
             int dieSize = Integer.parseInt(parts[1]);
-
             int total = 0;
             for (int i = 0; i < numDice; i++) {
                 total += (int) (Math.random() * dieSize) + 1;

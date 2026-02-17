@@ -120,7 +120,7 @@ public class ListSpellsCommand extends AbstractPlayerCommand {
      */
     private void displaySpell(PlayerRef playerRef, SpellData spell) {
         StringBuilder sb = new StringBuilder();
-        sb.append("    • ");
+        sb.append("    - ");
         sb.append(spell.getName());
 
         // Add level/cost info
@@ -135,11 +135,11 @@ public class ListSpellsCommand extends AbstractPlayerCommand {
 
         // Show brief description
         if (spell.getDamageDice() != null) {
-            playerRef.sendMessage(Message.raw("      → " + spell.getDamageDice() + " " +
+            playerRef.sendMessage(Message.raw("      > " + spell.getDamageDice() + " " +
                     spell.getDamageType().name().toLowerCase() + " damage").color("#FF6B6B"));
         }
 
-        playerRef.sendMessage(Message.raw("      → " + spell.getDescription()).color("#D3D3D3"));
+        playerRef.sendMessage(Message.raw("      > " + spell.getDescription()).color("#D3D3D3"));
         playerRef.sendMessage(Message.raw(""));
     }
 }
