@@ -4,7 +4,7 @@ plugins {
 }
 
 group = "com.example"
-version = "0.1.0"
+version = "0.3.2"
 val javaVersion = 25
 
 repositories {
@@ -12,11 +12,13 @@ repositories {
     maven("https://maven.hytale-modding.info/releases") {
         name = "HytaleModdingReleases"
     }
+    maven { url = uri("https://jitpack.io") }  // Fixed: moved outside the previous maven block
 }
 
 dependencies {
     compileOnly(libs.jetbrains.annotations)
     compileOnly(libs.jspecify)
+    compileOnly("com.github.Zoltus:TinyMessage:2.0.1")
 }
 
 hytale {
