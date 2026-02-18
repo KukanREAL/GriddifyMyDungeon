@@ -138,6 +138,7 @@ public class GridMovePlugin extends JavaPlugin {
         getCommandRegistry().registerCommand(new ClearHologramsCommand(gridMoveManager));
         getCommandRegistry().registerCommand(new GridOnCommand(gridMoveManager, collisionDetector, encounterManager, roleManager));
         getCommandRegistry().registerCommand(new GridOffCommand(gridMoveManager));
+        getCommandRegistry().registerCommand(new GridToggleCommand(gridMoveManager, collisionDetector, encounterManager, roleManager));
 
         // GM commands
         getCommandRegistry().registerCommand(new CreatureCommand(encounterManager, roleManager, collisionDetector));
@@ -185,6 +186,7 @@ public class GridMovePlugin extends JavaPlugin {
         // FIXED: SpellVisualManager now receives world at call time (not at init), avoiding null world on startup
         SpellVisualManager spellVisualManager = new SpellVisualManager(gridMoveManager);
         positionTracker.setSpellVisualManager(spellVisualManager);
+        gmPositionTracker.setSpellVisualManager(spellVisualManager);
         PersistentSpellManager persistentSpellManager = new PersistentSpellManager();
 
         // Spell casting commands - FIXED: Removed extra arguments
@@ -192,7 +194,7 @@ public class GridMovePlugin extends JavaPlugin {
         getCommandRegistry().registerCommand(new CastCommand(gridMoveManager, encounterManager, spellVisualManager, roleManager));
         getCommandRegistry().registerCommand(new CastTargetCommand(gridMoveManager, spellVisualManager));
         getCommandRegistry().registerCommand(new CastFinalCommand(gridMoveManager, encounterManager, spellVisualManager, combatSettings, roleManager));
-        getCommandRegistry().registerCommand(new CastCancelCommand(gridMoveManager, spellVisualManager));
+        getCommandRegistry().registerCommand(new CastCancelCommand(gridMoveManager, spellVisualManager, encounterManager, roleManager));
 
         // Help command
         getCommandRegistry().registerCommand(new GridHelpCommand(roleManager));

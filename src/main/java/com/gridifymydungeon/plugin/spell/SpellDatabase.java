@@ -92,11 +92,11 @@ public class SpellDatabase {
 
         registerBase(new SpellData(
                 "Cleave",
-                0, 0, SpellPattern.CONE, 2,
+                0, 0, SpellPattern.CONE, 1,
                 "2d8", DamageType.SLASHING,
                 ClassType.FIGHTER, 1,
                 false, 0,
-                "Sweeping attack in 180° arc in front. Weapon damage + STR to all adjacent"
+                "Sweeping attack 1 grid in front (5ft arc). Weapon damage + STR to targets in arc"
         ));
 
         registerBase(new SpellData(
@@ -159,11 +159,11 @@ public class SpellDatabase {
 
         registerBase(new SpellData(
                 "Entangle",
-                1, 18, SpellPattern.CUBE, 4,
+                1, 18, SpellPattern.CUBE, 2,
                 null, DamageType.NONE,
                 ClassType.DRUID, 1,
                 true, 10,
-                "4×4 grid square of grasping vines. STR save or restrained. Difficult terrain"
+                "20ft square of grasping vines (2 grid radius = 5x5 grids). STR save or restrained. Difficult terrain"
         ));
 
         registerBase(new SpellData(
@@ -320,11 +320,11 @@ public class SpellDatabase {
 
         registerBase(new SpellData(
                 "Thunderwave",
-                1, 0, SpellPattern.CUBE, 3,
+                1, 0, SpellPattern.CUBE, 1,
                 "2d8", DamageType.THUNDER,
                 ClassType.BARD, 1,
                 false, 0,
-                "3×3 grid cube. CON save for half, push 2 grids on fail. +1d8 per level"
+                "15ft cube (1 grid radius = 3x3 grids). CON save for half, push 2 grids on fail. +1d8 per level"
         ));
 
         registerBase(new SpellData(
@@ -338,11 +338,11 @@ public class SpellDatabase {
 
         registerBase(new SpellData(
                 "Hypnotic_Pattern",
-                3, 24, SpellPattern.CUBE, 6,
+                3, 24, SpellPattern.CUBE, 3,
                 null, DamageType.NONE,
                 ClassType.BARD, 5,
                 true, 10,
-                "6×6 grid. WIS save or charmed/incapacitated. Ends if damaged or shaken"
+                "30ft cube (3 grid radius = 7x7 grids). WIS save or charmed/incapacitated. Ends if damaged or shaken"
         ));
 
         registerBase(new SpellData(

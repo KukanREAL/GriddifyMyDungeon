@@ -210,10 +210,21 @@ public class CastFinalCommand extends AbstractPlayerCommand {
         visualManager.clearSpellVisuals(playerRef.getUuid(), world);
         state.clearSpellCastingState();
 
-        // Re-freeze NPC at the cast position so it doesn't teleport if the player
-        // walks around after casting. Auto-unfreezes when player moves to a new grid cell.
-        state.freeze("post_cast");
-        playerRef.sendMessage(Message.raw("[Griddify] NPC holds position — walk to a new cell to move it.").color("#87CEEB"));
+        boolean casterIsGMControlling = casterIsGM && encounterManager.getControlledMonster() != null;
+
+        if (casterIsGMControlling) {
+            // Keep the monster frozen at its cast position.
+            // GMPositionTracker will unfreeze it when the GM physically walks back to the monster's cell.
+            MonsterState castMonster = encounterManager.getControlledMonster();
+            castMonster.freeze("post_cast");
+            state.unfreeze(); // GM player state doesn't need to stay frozen
+            playerRef.sendMessage(Message.raw("[Griddify] Monster holds position — walk back to it to move it.").color("#87CEEB"));
+        } else {
+            // Player: re-freeze NPC at the cast position so it doesn't teleport if the player
+            // walks around after casting. Auto-unfreezes when player moves to a new grid cell.
+            state.freeze("post_cast");
+            playerRef.sendMessage(Message.raw("[Griddify] NPC holds position — walk to a new cell to move it.").color("#87CEEB"));
+        }
 
         // --- Show world event title ---
         String effectText;

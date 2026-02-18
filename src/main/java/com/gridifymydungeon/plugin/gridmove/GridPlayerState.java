@@ -54,6 +54,8 @@ public class GridPlayerState {
     // Grid overlay — variable number of Grid_Quarter entities (4 per reachable cell)
     public List<Ref<EntityStore>> gridOverlay = new ArrayList<>();
     public boolean gridOverlayEnabled = false;
+    /** True when the overlay is the GM 100x100 flat map (/grid), false when it's BFS range (/gridon). */
+    public boolean gmMapOverlayActive = false;
 
     // One-time "no moves" message — reset each turn
     public boolean noMovesMessageShown = false;

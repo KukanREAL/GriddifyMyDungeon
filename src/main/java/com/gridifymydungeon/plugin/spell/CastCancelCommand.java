@@ -1,5 +1,8 @@
 package com.gridifymydungeon.plugin.spell;
 
+import com.gridifymydungeon.plugin.dnd.EncounterManager;
+import com.gridifymydungeon.plugin.dnd.MonsterState;
+import com.gridifymydungeon.plugin.dnd.RoleManager;
 import com.gridifymydungeon.plugin.gridmove.GridMoveManager;
 import com.gridifymydungeon.plugin.gridmove.GridPlayerState;
 import com.hypixel.hytale.component.Ref;
@@ -15,18 +18,22 @@ import javax.annotation.Nonnull;
 
 /**
  * /CastCancel - Cancel a prepared spell and clear the red overlay.
- * Does NOT immediately unfreeze the NPC. The NPC stays at its locked position
- * and unfreezes naturally when the player walks back to the same grid cell
- * (same behaviour as a collision-freeze).
+ * For players: NPC stays frozen until player walks back to it.
+ * For GM: monster is unfrozen immediately so the GM can keep moving it.
  */
 public class CastCancelCommand extends AbstractPlayerCommand {
     private final GridMoveManager playerManager;
     private final SpellVisualManager visualManager;
+    private final EncounterManager encounterManager;
+    private final RoleManager roleManager;
 
-    public CastCancelCommand(GridMoveManager playerManager, SpellVisualManager visualManager) {
+    public CastCancelCommand(GridMoveManager playerManager, SpellVisualManager visualManager,
+                             EncounterManager encounterManager, RoleManager roleManager) {
         super("CastCancel", "Cancel a prepared spell");
         this.playerManager = playerManager;
         this.visualManager = visualManager;
+        this.encounterManager = encounterManager;
+        this.roleManager = roleManager;
     }
 
     @Override
@@ -42,13 +49,22 @@ public class CastCancelCommand extends AbstractPlayerCommand {
 
         String spellName = state.getSpellCastingState().getSpell().getName();
 
-        // Clear the spell state — this lets the normal collision-freeze unfreeze logic
-        // handle it: the NPC stays put and the player walks back to it to unfreeze.
         state.clearSpellCastingState();
+        state.unfreeze();
         visualManager.clearSpellVisuals(playerRef.getUuid(), world);
 
-        playerRef.sendMessage(Message.raw("[Griddify] " + spellName + " cancelled.").color("#FFA500"));
-        playerRef.sendMessage(Message.raw("[Griddify] Walk back to your NPC to unfreeze it.").color("#AAAAAA"));
+        // For GM: also unfreeze the monster immediately so it can move again
+        if (roleManager.isGM(playerRef)) {
+            MonsterState monster = encounterManager.getControlledMonster();
+            if (monster != null && monster.isFrozen && "casting".equals(monster.freezeReason)) {
+                monster.unfreeze();
+            }
+            playerRef.sendMessage(Message.raw("[Griddify] " + spellName + " cancelled. Monster unfrozen.").color("#FFA500"));
+        } else {
+            playerRef.sendMessage(Message.raw("[Griddify] " + spellName + " cancelled.").color("#FFA500"));
+            playerRef.sendMessage(Message.raw("[Griddify] Walk back to your NPC to unfreeze it.").color("#AAAAAA"));
+        }
+
         System.out.println("[Griddify] [CASTCANCEL] " + playerRef.getUsername() + " cancelled " + spellName);
     }
 }

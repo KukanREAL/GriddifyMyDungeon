@@ -97,20 +97,19 @@ public class SpellPatternCalculator {
     }
 
     /**
-     * D&D cone — correct shape for all 8 directions.
+     * D&D cone — stair-step pattern where the tip is closest to the caster.
      *
-     * Cardinal (NORTH, length=3):     Diagonal (NORTHEAST, length=3):
-     *   X X X  ← dist 3 (3 wide)       . . X X X  ← dist 3 (3 wide)
-     *   X X X  ← dist 2 (3 wide)       . . X X X  ← dist 2 (3 wide)
-     *   . X .  ← dist 1 (1 wide)       . . . X .  ← dist 1 (1 wide)
-     *   [NPC]                           [NPC]
+     * The cone grows 1 cell wider per row away from the caster:
+     *   row 1 (adjacent):  1 cell wide
+     *   row 2:             2 cells wide
+     *   row 3:             3 cells wide
+     *   ...and so on up to 'length' rows.
      *
-     * Rule: at distance d, halfWidth = min(d-1, floor(length/2)).
+     * The far corner of the cone is diagonal from the player, per D&D 5e rules.
+     * Width at row d = d cells (centered on the forward axis, offset to one side for even rows).
      *
-     * For cardinal directions the perpendicular is computed naturally (-fdz, fdx).
-     * For diagonal directions (where both fdx and fdz are non-zero) we snap the
-     * perpendicular to a purely cardinal axis (zero out the smaller component) so
-     * that each row's cells are horizontally/vertically contiguous on the grid.
+     * For cardinal directions the spread is perpendicular (left/right).
+     * For diagonal directions the spread is along the perpendicular cardinal axis.
      */
     private static Set<GridCell> calculateCone(Direction8 direction, int originX, int originZ, int length) {
         Set<GridCell> cells = new HashSet<>();
@@ -118,27 +117,30 @@ public class SpellPatternCalculator {
         int fdx = direction.getDeltaX();
         int fdz = direction.getDeltaZ();
 
-        // Perpendicular axis: rotate 90° counter-clockwise, then for diagonals snap to cardinal
-        int perpDx = -fdz;
-        int perpDz =  fdx;
-
-        // For diagonal directions both fdx and fdz are ±1. The raw perp (1,1) or (-1,1) etc.
-        // spreads cells diagonally, making rows non-contiguous. Snap to E-W spread instead.
+        // Perpendicular spread axis: rotate 90°, snap diagonals to cardinal
+        int perpDx, perpDz;
         boolean isDiagonal = (fdx != 0 && fdz != 0);
         if (isDiagonal) {
-            perpDx = 1;  // always spread East-West for diagonals
+            // For diagonal directions spread East-West (perpendicular-ish to the diagonal)
+            perpDx = 1;
             perpDz = 0;
+        } else {
+            // For cardinal directions rotate 90° CCW
+            perpDx = -fdz;
+            perpDz =  fdx;
         }
 
-        int maxHalf = length / 2;
-
         for (int dist = 1; dist <= length; dist++) {
-            int halfWidth = Math.min(dist - 1, maxHalf);
-
+            // Width at this row = dist (1, 2, 3, ...)
+            int width = dist;
+            // Center of this row
             int cx = originX + fdx * dist;
             int cz = originZ + fdz * dist;
 
-            for (int side = -halfWidth; side <= halfWidth; side++) {
+            // Spread from -(width-1) to 0 or 0 to (width-1)?
+            // Per spec: the corner is diagonally from the player, meaning the cone
+            // is offset to one side. We offset left: from -(width-1) to 0.
+            for (int side = -(width - 1); side <= 0; side++) {
                 cells.add(new GridCell(cx + perpDx * side, cz + perpDz * side));
             }
         }

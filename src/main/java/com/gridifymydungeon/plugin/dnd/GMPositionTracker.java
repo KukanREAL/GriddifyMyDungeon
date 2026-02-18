@@ -29,6 +29,13 @@ public class GMPositionTracker {
     private final CollisionDetector collisionDetector;
     private final GridMoveManager gridMoveManager;
 
+    // Injected after construction (same pattern as PlayerPositionTracker)
+    private com.gridifymydungeon.plugin.spell.SpellVisualManager spellVisualManager = null;
+
+    public void setSpellVisualManager(com.gridifymydungeon.plugin.spell.SpellVisualManager svm) {
+        this.spellVisualManager = svm;
+    }
+
     private final Map<PlayerRef, Long> lastMoveTime = new HashMap<>();
     private final AtomicBoolean movePending = new AtomicBoolean(false);
 
@@ -63,9 +70,66 @@ public class GMPositionTracker {
         int newGridX = newGrid[0];
         int newGridZ = newGrid[1];
 
+        GridPlayerState gmState = gridMoveManager.getState(playerRef);
+
+        // -----------------------------------------------------------------------
+        // SPELL CASTING MODE: monster frozen with reason "casting"
+        // GM body movement aims the spell overlay, NOT the monster
+        // -----------------------------------------------------------------------
+        if (monster.isFrozen && "casting".equals(monster.freezeReason)) {
+            // Compute GM's current grid position (relative to world, not monster)
+            int gmGridX = (int) Math.floor(newPosition.getX() / 2.0);
+            int gmGridZ = (int) Math.floor(newPosition.getZ() / 2.0);
+
+            com.gridifymydungeon.plugin.spell.SpellCastingState castState = gmState.getSpellCastingState();
+            if (castState != null && castState.isValid()) {
+                if (castState.getAimGridX() != gmGridX || castState.getAimGridZ() != gmGridZ) {
+                    if (spellVisualManager != null) {
+                        castState.updatePlayerPosition(gmGridX, gmGridZ);
+                        final int px = gmGridX, pz = gmGridZ;
+                        final float py = monster.spawnY;
+                        final com.gridifymydungeon.plugin.spell.Direction8 dir = castState.getDirection();
+                        final com.gridifymydungeon.plugin.spell.SpellData spellData = castState.getSpell();
+                        final com.gridifymydungeon.plugin.spell.SpellPattern pattern = spellData.getPattern();
+                        final int cx = castState.getCasterGridX(), cz = castState.getCasterGridZ();
+                        world.execute(() -> {
+                            java.util.Set<com.gridifymydungeon.plugin.spell.SpellPatternCalculator.GridCell> cells =
+                                    com.gridifymydungeon.plugin.spell.CastCommand.computeOverlay(
+                                            pattern, dir, cx, cz, spellData, px, pz);
+                            spellVisualManager.showSpellArea(playerRef.getUuid(), cells, world, py);
+                        });
+                        lastMoveTime.put(playerRef, now);
+                    }
+                }
+            } else {
+                // Cast state expired — clean up
+                gmState.clearSpellCastingState();
+                monster.unfreeze();
+            }
+            monster.lastGMPosition = newPosition;
+            return;
+        }
+
+        // -----------------------------------------------------------------------
+        // POST-CAST FREEZE: monster stays at cast position until GM walks back to it
+        // -----------------------------------------------------------------------
+        if (monster.isFrozen && "post_cast".equals(monster.freezeReason)) {
+            // Unfreeze when GM physically walks to the monster's grid cell
+            if (newGridX == monster.currentGridX && newGridZ == monster.currentGridZ) {
+                monster.unfreeze();
+                playerRef.sendMessage(com.hypixel.hytale.server.core.Message.raw(
+                        "[Griddify] Monster unfrozen — ready to move!"));
+            }
+            monster.lastGMPosition = newPosition;
+            return;
+        }
+
+        // -----------------------------------------------------------------------
+        // NORMAL COLLISION-FREEZE: existing unfreeze-on-return logic
+        // -----------------------------------------------------------------------
         if (monster.isFrozen && newGridX == monster.currentGridX && newGridZ == monster.currentGridZ) {
             monster.unfreeze();
-            playerRef.sendMessage(Message.raw("[Griddify] Monster unfrozen!"));
+            playerRef.sendMessage(com.hypixel.hytale.server.core.Message.raw("[Griddify] Monster unfrozen!"));
         }
 
         if (newGridX != monster.currentGridX || newGridZ != monster.currentGridZ) {

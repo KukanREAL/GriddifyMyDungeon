@@ -145,8 +145,13 @@ public class CastCommand extends AbstractPlayerCommand {
         }
 
         // -----------------------------------------------------------------------
-        // All other patterns: freeze NPC, player walks to aim / rotate
+        // All other patterns: freeze NPC/monster, player walks to aim / rotate
         // -----------------------------------------------------------------------
+        // For GM controlling a monster: freeze the MONSTER so GMPositionTracker
+        // stops moving it. GM body movement will instead aim the spell overlay.
+        if (isGmControlling) {
+            encounterManager.getControlledMonster().freeze("casting");
+        }
         state.freeze("casting");
         state.setSpellCastingState(new SpellCastingState(spell, null, initialDirection, casterGridX, casterGridZ, casterY));
 
@@ -218,6 +223,7 @@ public class CastCommand extends AbstractPlayerCommand {
 
     private String spellLabel(SpellData spell) {
         if (spell.isSubclassSpell()) return spell.getName() + " (" + spell.getSubclass().getDisplayName() + ")";
+        if (spell.getClassType() == null) return spell.getName() + " (Monster Attack)";
         return spell.getName() + " (" + spell.getClassType().getDisplayName() + ")";
     }
     private float getPlayerY(PlayerRef playerRef) {

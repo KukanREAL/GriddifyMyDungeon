@@ -25,11 +25,13 @@ import javax.annotation.Nonnull;
 /**
  * /gridon — Show grid overlay.
  *
- * PLAYER: blue Grid_Corner_Player tiles showing BFS movement range.
+ * PLAYER: blue Grid_Player tiles showing BFS movement range.
  *
- * GM + /control active: grey Grid_Player tiles showing monster movement range.
- * GM + no control:      grey 100x100 flat area map around GM position.
+ * GM + /control active: blue Grid_Player tiles showing monster BFS movement range (same as player).
+ * GM + no control:      grey flat area map around GM position.
  *                       Barrier blocks and fluid cells are skipped.
+ *
+ * For a persistent 100x100 map that follows the monster, use /grid instead.
  */
 public class GridOnCommand extends AbstractPlayerCommand {
 
@@ -63,7 +65,7 @@ public class GridOnCommand extends AbstractPlayerCommand {
             MonsterState monster = encounterManager.getControlledMonster();
 
             if (monster != null) {
-                // Monster movement range overlay
+                // Monster BFS movement range — blue Grid_Player texture, same as players
                 gmState.currentGridX = monster.currentGridX;
                 gmState.currentGridZ = monster.currentGridZ;
                 gmState.npcY         = monster.spawnY;
@@ -71,16 +73,15 @@ public class GridOnCommand extends AbstractPlayerCommand {
                 gmState.maxMoves       = monster.maxMoves;
 
                 world.execute(() -> {
-                    GridOverlayManager.spawnGridOverlay(world, gmState, collisionDetector, null);
+                    GridOverlayManager.spawnGMBFSOverlay(world, gmState, collisionDetector);
                     notify(playerRef, "Grid overlay enabled!", "Showing " + monster.getDisplayName() + "'s range",
                             "#90EE90", "Ingredient_Crystal_Green");
                 });
-                System.out.println("[Griddify] [GRIDON] GM monster range overlay for " + monster.getDisplayName());
+                System.out.println("[Griddify] [GRIDON] GM monster range overlay (blue) for " + monster.getDisplayName());
 
             } else {
-                // 100x100 area map — read GM's actual world position first
+                // No monster — flat area map around GM position
                 world.execute(() -> {
-                    // Populate gmState position from GM's real transform
                     try {
                         com.hypixel.hytale.server.core.modules.entity.component.TransformComponent transform =
                                 store.getComponent(ref, com.hypixel.hytale.server.core.modules.entity.component.TransformComponent.getComponentType());
@@ -92,10 +93,10 @@ public class GridOnCommand extends AbstractPlayerCommand {
                         }
                     } catch (Exception ignored) {}
                     GridOverlayManager.spawnGMMapOverlay(world, gmState);
-                    notify(playerRef, "100x100 area map spawned!",
+                    notify(playerRef, "Area map spawned!",
                             "Barriers and fluids excluded", "#90EE90", "Ingredient_Crystal_Green");
                 });
-                System.out.println("[Griddify] [GRIDON] GM spawned 100x100 map overlay");
+                System.out.println("[Griddify] [GRIDON] GM spawned flat map overlay");
             }
             return;
         }
