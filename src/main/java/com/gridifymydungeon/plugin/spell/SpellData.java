@@ -23,6 +23,7 @@ public class SpellData {
     private final boolean persistent;    // Does it last multiple turns?
     private final int durationTurns;     // How many turns (0 = instant)
     private final String description;
+    private final int maxTargets;        // Number of separate aim cursors (1 = normal, >1 = multi-target)
 
     // TODO FUTURE: Add saving throw type (DEX/WIS/CON/etc.)
     // TODO FUTURE: Add status effects (frightened, paralyzed, etc.)
@@ -36,6 +37,14 @@ public class SpellData {
                      int areaGrids, String damageDice, DamageType damageType,
                      ClassType classType, int minLevel, boolean persistent,
                      int durationTurns, String description) {
+        this(name, spellLevel, rangeGrids, pattern, areaGrids, damageDice, damageType,
+                classType, minLevel, persistent, durationTurns, description, 1);
+    }
+
+    public SpellData(String name, int spellLevel, int rangeGrids, SpellPattern pattern,
+                     int areaGrids, String damageDice, DamageType damageType,
+                     ClassType classType, int minLevel, boolean persistent,
+                     int durationTurns, String description, int maxTargets) {
         this.name = name;
         this.spellLevel = spellLevel;
         this.rangeGrids = rangeGrids;
@@ -44,11 +53,12 @@ public class SpellData {
         this.damageDice = damageDice;
         this.damageType = damageType;
         this.classType = classType;
-        this.subclassType = null; // Base class spells don't have subclass
+        this.subclassType = null;
         this.minLevel = minLevel;
         this.persistent = persistent;
         this.durationTurns = durationTurns;
         this.description = description;
+        this.maxTargets = Math.max(1, maxTargets);
     }
 
     /**
@@ -58,6 +68,14 @@ public class SpellData {
                      int areaGrids, String damageDice, DamageType damageType,
                      SubclassType subclassType, int minLevel, boolean persistent,
                      int durationTurns, String description) {
+        this(name, spellLevel, rangeGrids, pattern, areaGrids, damageDice, damageType,
+                subclassType, minLevel, persistent, durationTurns, description, 1);
+    }
+
+    public SpellData(String name, int spellLevel, int rangeGrids, SpellPattern pattern,
+                     int areaGrids, String damageDice, DamageType damageType,
+                     SubclassType subclassType, int minLevel, boolean persistent,
+                     int durationTurns, String description, int maxTargets) {
         this.name = name;
         this.spellLevel = spellLevel;
         this.rangeGrids = rangeGrids;
@@ -71,6 +89,7 @@ public class SpellData {
         this.persistent = persistent;
         this.durationTurns = durationTurns;
         this.description = description;
+        this.maxTargets = Math.max(1, maxTargets);
     }
 
     // Getters
@@ -90,6 +109,8 @@ public class SpellData {
     public boolean isPersistent() { return persistent; }
     public int getDurationTurns() { return durationTurns; }
     public String getDescription() { return description; }
+    public int getMaxTargets() { return maxTargets; }
+    public boolean isMultiTarget() { return maxTargets > 1; }
 
     /**
      * Calculate spell slot cost
@@ -97,6 +118,14 @@ public class SpellData {
      */
     public int getSlotCost() {
         return spellLevel;
+    }
+
+    /**
+     * A spell is a healing spell if it has DamageType.NONE and a dice expression.
+     * The damageDice field doubles as the healing dice for these spells.
+     */
+    public boolean isHealingSpell() {
+        return damageType == DamageType.NONE && damageDice != null && !damageDice.isEmpty();
     }
 
     /**

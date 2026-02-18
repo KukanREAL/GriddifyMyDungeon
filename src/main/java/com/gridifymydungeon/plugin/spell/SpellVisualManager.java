@@ -2,13 +2,16 @@ package com.gridifymydungeon.plugin.spell;
 
 import com.gridifymydungeon.plugin.dnd.commands.MonsterEntityController;
 import com.gridifymydungeon.plugin.gridmove.GridMoveManager;
+import com.gridifymydungeon.plugin.gridmove.GridPlayerState;
 import com.hypixel.hytale.component.AddReason;
 import com.hypixel.hytale.component.Holder;
 import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.component.RemoveReason;
 import com.hypixel.hytale.component.Store;
+import com.hypixel.hytale.math.util.ChunkUtil;
 import com.hypixel.hytale.math.vector.Vector3d;
 import com.hypixel.hytale.math.vector.Vector3f;
+import com.hypixel.hytale.math.vector.Vector3i;
 import com.hypixel.hytale.server.core.asset.type.model.config.Model;
 import com.hypixel.hytale.server.core.asset.type.model.config.ModelAsset;
 import com.hypixel.hytale.server.core.entity.UUIDComponent;
@@ -17,15 +20,25 @@ import com.hypixel.hytale.server.core.modules.entity.component.ModelComponent;
 import com.hypixel.hytale.server.core.modules.entity.component.TransformComponent;
 import com.hypixel.hytale.server.core.modules.entity.tracker.NetworkId;
 import com.hypixel.hytale.server.core.universe.world.World;
+import com.hypixel.hytale.server.core.universe.world.chunk.ChunkColumn;
+import com.hypixel.hytale.server.core.universe.world.chunk.section.ChunkSection;
+import com.hypixel.hytale.server.core.universe.world.chunk.section.FluidSection;
+import com.hypixel.hytale.server.core.universe.world.storage.ChunkStore;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
+import com.hypixel.hytale.protocol.BlockMaterial;
+import com.hypixel.hytale.server.core.asset.type.blocktype.config.BlockType;
 
 import java.util.*;
 
 /**
  * Manages spell range/area visualization using Grid_Spell entities (red).
  *
- * One entity per 2x2 grid cell, centred at the cell's world-space midpoint.
- * No rotation needed — the texture covers the full 2x2 tile.
+ * Y-placement rules:
+ *  - Ground found  → spawn at groundY + 0.2
+ *  - Fluid present → spawn on TOP of fluid (fluidTopY + 0.2) — spells hit fluid surfaces
+ *  - Pure air      → SKIP (no grid on air cells)
+ *
+ * All grids use the NPC's stored npcY as the reference height, never the player body Y.
  */
 public class SpellVisualManager {
 
@@ -33,10 +46,10 @@ public class SpellVisualManager {
 
     private final Map<UUID, List<Ref<EntityStore>>> playerSpellVisuals = new HashMap<>();
 
-    private static final String SPELL_MODEL_ID   = "Grid_Spell";
+    private static final String SPELL_MODEL_ID    = "Grid_Spell";
     private static final String FALLBACK_MODEL_ID = "Grid_Basic";
 
-    private static Model cachedSpellModel    = null;
+    private static Model cachedSpellModel     = null;
     private static boolean modelLoadAttempted = false;
 
     public SpellVisualManager(GridMoveManager gridManager) {
@@ -48,7 +61,8 @@ public class SpellVisualManager {
     // ========================================================
 
     /**
-     * Show spell area in red. One tile entity per cell, centred in the 2x2 block.
+     * Show spell area in red.
+     * Uses npcY (NPC ground height) as reference — never raw playerY body height.
      */
     public void showSpellArea(UUID playerUUID, Set<SpellPatternCalculator.GridCell> cells,
                               World world, float playerY) {
@@ -60,27 +74,32 @@ public class SpellVisualManager {
             return;
         }
 
-        float referenceY = resolveReferenceY(playerUUID, playerY);
+        // Use NPC's stored ground Y as reference — ignore raw body Y which is above ground
+        float referenceY = resolveNpcY(playerUUID, playerY);
 
         List<Ref<EntityStore>> newVisuals = new ArrayList<>();
         Store<EntityStore> store = world.getEntityStore().getStore();
 
         for (SpellPatternCalculator.GridCell cell : cells) {
-            // Centre of the 2x2 block
             float cx = (cell.x * 2.0f) + 1.0f;
             float cz = (cell.z * 2.0f) + 1.0f;
 
-            Float groundY = MonsterEntityController.scanForGroundPublic(world, cell.x, cell.z, referenceY);
-            if (groundY == null) groundY = referenceY;
-            float y = groundY + 0.01f;
+            // scanForGroundPublic scans from (ref - MIN_OFFSET=3) downward.
+            // referenceY is npcY which is already AT ground, so we pass referenceY + 3
+            // to make the scan start just above ground and sweep down to find the surface.
+            Float groundY = MonsterEntityController.scanForGroundPublic(world, cell.x, cell.z, referenceY + 3.0f);
 
+            // Fallback: use referenceY directly (flat terrain, stairs, etc.)
+            if (groundY == null) groundY = referenceY;
+
+            float y = groundY + 0.03f; // Grid_Spell: +0.03 Y offset
             Ref<EntityStore> ref = spawnTile(store, model, cx, y, cz);
             if (ref != null) newVisuals.add(ref);
         }
 
         playerSpellVisuals.put(playerUUID, newVisuals);
         System.out.println("[Griddify] [SPELL] Spell overlay: " + cells.size() +
-                " cells (" + newVisuals.size() + " entities)");
+                " cells → " + newVisuals.size() + " placed (skipped air/out-of-range)");
     }
 
     public void clearSpellVisuals(UUID playerUUID, World world) {
@@ -100,24 +119,82 @@ public class SpellVisualManager {
     }
 
     // ========================================================
-    // HELPERS
+    // Y REFERENCE — always use NPC ground Y, not player body Y
     // ========================================================
 
-    private float resolveReferenceY(UUID playerUUID, float playerY) {
-        if (playerY != 0.0f) return playerY;
-        for (Map.Entry<UUID, com.gridifymydungeon.plugin.gridmove.GridPlayerState> e :
-                gridManager.getStateEntries()) {
+    /**
+     * Resolve the reference Y for ground scanning.
+     * Prefers the NPC's stored npcY (ground-snapped) over raw player body Y.
+     * Raw player body Y is above ground (eye-level), causing grids to spawn too high.
+     */
+    private float resolveNpcY(UUID playerUUID, float fallbackY) {
+        for (Map.Entry<UUID, GridPlayerState> e : gridManager.getStateEntries()) {
             if (e.getKey().equals(playerUUID)) {
                 float ny = e.getValue().npcY;
                 if (ny != 0.0f) return ny;
                 break;
             }
         }
-        return 64.0f;
+        // Last resort: step down from body Y since body Y is roughly 1.8 blocks above feet
+        return fallbackY - 1.8f;
     }
 
     // ========================================================
-    // ENTITY SPAWNING — single tile per cell, no rotation
+    // FLUID SURFACE DETECTION
+    // ========================================================
+
+    /**
+     * Find the top Y of a fluid body at this grid cell, scanning downward from referenceY.
+     * Returns the Y coordinate where the fluid surface is (for placing the grid on top).
+     */
+    private static Float findFluidSurfaceY(World world, int gridX, int gridZ, float referenceY) {
+        try {
+            Store<ChunkStore> chunkStore = world.getChunkStore().getStore();
+            int startY = (int) Math.floor(referenceY - 3);
+            int endY   = (int) Math.floor(referenceY - 15);
+
+            for (int checkY = startY; checkY >= endY; checkY--) {
+                boolean hasFluid = false;
+                for (int xOff = 0; xOff < 2 && !hasFluid; xOff++) {
+                    for (int zOff = 0; zOff < 2 && !hasFluid; zOff++) {
+                        int bx = (gridX * 2) + xOff;
+                        int bz = (gridZ * 2) + zOff;
+                        FluidSection fs = findFluidSection(world, chunkStore, bx, checkY, bz);
+                        if (fs != null && fs.getFluidId(bx, checkY, bz) != 0) {
+                            hasFluid = true;
+                        }
+                    }
+                }
+                if (hasFluid) {
+                    // Return top of this fluid layer
+                    return (float) checkY + 1.0f;
+                }
+            }
+        } catch (Exception ignored) {}
+        return null;
+    }
+
+    private static FluidSection findFluidSection(World world, Store<ChunkStore> store,
+                                                 int bx, int by, int bz) {
+        try {
+            long idx = ChunkUtil.indexChunkFromBlock(bx, bz);
+            Ref<ChunkStore> cRef = world.getChunkStore().getChunkReference(idx);
+            if (cRef == null || !cRef.isValid()) return null;
+            ChunkColumn col = store.getComponent(cRef, ChunkColumn.getComponentType());
+            if (col == null) return null;
+            int targetSY = ChunkUtil.chunkCoordinate(by);
+            for (Ref<ChunkStore> sRef : col.getSections()) {
+                if (sRef == null || !sRef.isValid()) continue;
+                ChunkSection sec = store.getComponent(sRef, ChunkSection.getComponentType());
+                if (sec != null && sec.getY() == targetSY)
+                    return store.getComponent(sRef, FluidSection.getComponentType());
+            }
+        } catch (Exception ignored) {}
+        return null;
+    }
+
+    // ========================================================
+    // ENTITY SPAWNING
     // ========================================================
 
     private Ref<EntityStore> spawnTile(Store<EntityStore> store, Model model,
@@ -146,7 +223,6 @@ public class SpellVisualManager {
         if (cachedSpellModel != null) return cachedSpellModel;
         if (modelLoadAttempted) return null;
         modelLoadAttempted = true;
-
         cachedSpellModel = loadModel(SPELL_MODEL_ID);
         if (cachedSpellModel == null) cachedSpellModel = loadModel(FALLBACK_MODEL_ID);
         return cachedSpellModel;

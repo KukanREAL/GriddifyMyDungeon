@@ -27,7 +27,7 @@ import javax.annotation.Nonnull;
  *
  * PLAYER: blue Grid_Corner_Player tiles showing BFS movement range.
  *
- * GM + /control active: grey Grid_Corner_Flat tiles showing monster movement range.
+ * GM + /control active: grey Grid_Player tiles showing monster movement range.
  * GM + no control:      grey 100x100 flat area map around GM position.
  *                       Barrier blocks and fluid cells are skipped.
  */
@@ -78,9 +78,19 @@ public class GridOnCommand extends AbstractPlayerCommand {
                 System.out.println("[Griddify] [GRIDON] GM monster range overlay for " + monster.getDisplayName());
 
             } else {
-                // 100x100 area map — needs GM's current grid position
-                // Use npcY if available, otherwise send a message asking for position
+                // 100x100 area map — read GM's actual world position first
                 world.execute(() -> {
+                    // Populate gmState position from GM's real transform
+                    try {
+                        com.hypixel.hytale.server.core.modules.entity.component.TransformComponent transform =
+                                store.getComponent(ref, com.hypixel.hytale.server.core.modules.entity.component.TransformComponent.getComponentType());
+                        if (transform != null) {
+                            com.hypixel.hytale.math.vector.Vector3d pos = transform.getPosition();
+                            gmState.currentGridX = (int) Math.floor(pos.getX() / 2.0);
+                            gmState.currentGridZ = (int) Math.floor(pos.getZ() / 2.0);
+                            gmState.npcY         = (float) pos.getY();
+                        }
+                    } catch (Exception ignored) {}
                     GridOverlayManager.spawnGMMapOverlay(world, gmState);
                     notify(playerRef, "100x100 area map spawned!",
                             "Barriers and fluids excluded", "#90EE90", "Ingredient_Crystal_Green");

@@ -190,7 +190,8 @@ public class GridMovePlugin extends JavaPlugin {
         // Spell casting commands - FIXED: Removed extra arguments
         getCommandRegistry().registerCommand(new ListSpellsCommand(gridMoveManager, roleManager, encounterManager));
         getCommandRegistry().registerCommand(new CastCommand(gridMoveManager, encounterManager, spellVisualManager, roleManager));
-        getCommandRegistry().registerCommand(new CastFinalCommand(gridMoveManager, encounterManager, spellVisualManager, combatSettings));
+        getCommandRegistry().registerCommand(new CastTargetCommand(gridMoveManager, spellVisualManager));
+        getCommandRegistry().registerCommand(new CastFinalCommand(gridMoveManager, encounterManager, spellVisualManager, combatSettings, roleManager));
         getCommandRegistry().registerCommand(new CastCancelCommand(gridMoveManager, spellVisualManager));
 
         // Help command

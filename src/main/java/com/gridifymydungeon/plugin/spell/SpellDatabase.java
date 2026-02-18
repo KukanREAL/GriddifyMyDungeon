@@ -38,7 +38,7 @@ public class SpellDatabase {
                 "1d4", DamageType.FORCE,
                 ClassType.WIZARD, 1,
                 false, 0,
-                "Auto-hit 3 missiles dealing 1d4+1 each. +1 missile every 2 levels (max 5 at lvl 9)"
+                "Auto-hit 3 missiles dealing 1d4+1 each. +1 missile every 2 levels (max 5 at lvl 9)", 3
         ));
 
         registerBase(new SpellData(
@@ -83,7 +83,7 @@ public class SpellDatabase {
                 "4d10", DamageType.FORCE,
                 ClassType.WIZARD, 7,
                 false, 0,
-                "Multi-target (up to 3 targets). Can split or focus all on one"
+                "Multi-target (up to 3 targets). Can split or focus all on one", 3
         ));
 
         // =====================================================================
@@ -467,7 +467,7 @@ public class SpellDatabase {
                 null, DamageType.NONE,
                 ClassType.CLERIC, 1,
                 true, 10,
-                "3 targets. +1d4 to attack rolls and saves. Lasts 10 turns"
+                "3 targets. +1d4 to attack rolls and saves. Lasts 10 turns", 3
         ));
 
         registerBase(new SpellData(
@@ -713,7 +713,7 @@ public class SpellDatabase {
                 "10d8", DamageType.LIGHTNING,
                 SubclassType.WIZARD_EVOCATION, 9,
                 false, 0,
-                "Chains to 3 targets within 6 grids each. +1 target per level above 6th"
+                "Chains to 3 targets within 6 grids each. +1 target per level above 6th", 3
         ));
 
         registerSubclass(new SpellData(

@@ -3,6 +3,7 @@ package com.gridifymydungeon.plugin.spell;
 import com.gridifymydungeon.plugin.dnd.CombatSettings;
 import com.gridifymydungeon.plugin.dnd.EncounterManager;
 import com.gridifymydungeon.plugin.dnd.MonsterState;
+import com.gridifymydungeon.plugin.dnd.RoleManager;
 import com.gridifymydungeon.plugin.gridmove.GridMoveManager;
 import com.gridifymydungeon.plugin.gridmove.GridPlayerState;
 import com.hypixel.hytale.component.Ref;
@@ -20,6 +21,7 @@ import com.hypixel.hytale.server.core.util.EventTitleUtil;
 import com.hypixel.hytale.server.core.util.NotificationUtil;
 
 import javax.annotation.Nonnull;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
@@ -34,14 +36,17 @@ public class CastFinalCommand extends AbstractPlayerCommand {
     private final EncounterManager encounterManager;
     private final SpellVisualManager visualManager;
     private final CombatSettings combatSettings;
+    private final RoleManager roleManager;
 
     public CastFinalCommand(GridMoveManager playerManager, EncounterManager encounterManager,
-                            SpellVisualManager visualManager, CombatSettings combatSettings) {
+                            SpellVisualManager visualManager, CombatSettings combatSettings,
+                            RoleManager roleManager) {
         super("CastFinal", "Execute prepared spell");
         this.playerManager = playerManager;
         this.encounterManager = encounterManager;
         this.visualManager = visualManager;
         this.combatSettings = combatSettings;
+        this.roleManager = roleManager;
     }
 
     @Override
@@ -77,8 +82,10 @@ public class CastFinalCommand extends AbstractPlayerCommand {
             return;
         }
 
-        // Commit: unfreeze NPC, consume slot, mark action used, calculate affected area.
-        state.unfreeze();
+        // Commit: mark action used, calculate affected area.
+        // Do NOT unfreeze yet — we re-freeze with reason "post_cast" after resolving so the NPC
+        // stays at the cast position. PlayerPositionTracker auto-unfreezes when the player
+        // physically moves to a different grid cell.
         state.hasUsedAction = true; // Consume action for this turn
 
         int cost = spell.getSlotCost();
@@ -93,27 +100,40 @@ public class CastFinalCommand extends AbstractPlayerCommand {
 
         // Calculate affected cells based on pattern type:
         //   NPC-origin patterns (SELF, AURA, CONE, LINE, WALL): always fire from the frozen NPC cell.
+        //   Multi-target: fire on each confirmed target cell individually.
         //   Targeted patterns (SINGLE_TARGET, SPHERE, CUBE, etc.): fire centred on the aimed cell.
         Set<SpellPatternCalculator.GridCell> affectedCells;
-        switch (pattern) {
-            case SELF:
-            case AURA:
-            case CONE:
-            case LINE:
-            case WALL:
-                // All NPC-origin patterns: direction already updated live as player walked around NPC
-                affectedCells = SpellPatternCalculator.calculatePattern(
-                        pattern, castState.getDirection(),
-                        castState.getCasterGridX(), castState.getCasterGridZ(),
-                        spell.getRangeGrids(), spell.getAreaGrids());
-                break;
-            default:
-                // SINGLE_TARGET, SPHERE, CUBE, CYLINDER, CHAIN — centred on aimed cell
-                affectedCells = SpellPatternCalculator.calculatePattern(
-                        pattern, castState.getDirection(),
-                        aimGridX, aimGridZ,
-                        spell.getRangeGrids(), spell.getAreaGrids());
-                break;
+
+        if (spell.isMultiTarget() && !castState.getConfirmedTargets().isEmpty()) {
+            // Multi-target: affected cells = all confirmed target cells
+            affectedCells = new HashSet<>();
+            for (SpellCastingState.GridCell c : castState.getConfirmedTargets()) {
+                affectedCells.add(new SpellPatternCalculator.GridCell(c.x, c.z));
+            }
+            // If player never typed /CastTarget at all, fall back to current aim cell
+            if (affectedCells.isEmpty()) {
+                affectedCells.add(new SpellPatternCalculator.GridCell(aimGridX, aimGridZ));
+            }
+        } else {
+            switch (pattern) {
+                case SELF:
+                case AURA:
+                case CONE:
+                case LINE:
+                case WALL:
+                    affectedCells = SpellPatternCalculator.calculatePattern(
+                            pattern, castState.getDirection(),
+                            castState.getCasterGridX(), castState.getCasterGridZ(),
+                            spell.getRangeGrids(), spell.getAreaGrids());
+                    break;
+                default:
+                    // SINGLE_TARGET, SPHERE, CUBE, CYLINDER, CHAIN
+                    affectedCells = SpellPatternCalculator.calculatePattern(
+                            pattern, castState.getDirection(),
+                            aimGridX, aimGridZ,
+                            spell.getRangeGrids(), spell.getAreaGrids());
+                    break;
+            }
         }
 
         // Debug: log affected cells and monster positions so direction issues are visible
@@ -129,27 +149,52 @@ public class CastFinalCommand extends AbstractPlayerCommand {
         dbg.append("]");
         System.out.println(dbg);
 
-        // --- Calculate damage ---
-        int totalDamage = 0;
+        // --- Calculate roll amount (damage or healing) ---
+        int rollAmount = 0;
         if (spell.getDamageDice() != null && !spell.getDamageDice().isEmpty()) {
-            totalDamage = rollDamage(spell.getDamageDice());
-            totalDamage += state.stats.getSpellcastingModifier();
-            if (totalDamage < 0) totalDamage = 0; // damage can't go negative
+            rollAmount = rollDamage(spell.getDamageDice());
+            rollAmount += state.stats.getSpellcastingModifier();
+            if (rollAmount < 0) rollAmount = 0;
         }
 
-        // --- Apply to all monsters in affected area ---
-        int monstersHit = 0;
-        List<MonsterState> allMonsters = encounterManager.getMonsters();
-        for (MonsterState monster : allMonsters) {
-            if (!monster.isAlive()) continue;
-            if (affectedCells.contains(new SpellPatternCalculator.GridCell(monster.currentGridX, monster.currentGridZ))) {
-                monstersHit++;
-                if (totalDamage > 0) {
-                    monster.takeDamage(totalDamage);
+        boolean isHeal = spell.isHealingSpell();
+        boolean casterIsGM = roleManager.isGM(playerRef);
+
+        int targetsAffected = 0;
+
+        if (isHeal) {
+            if (casterIsGM) {
+                // GM/monster cast: heal monsters in area
+                for (MonsterState monster : encounterManager.getMonsters()) {
+                    if (!monster.isAlive()) continue;
+                    if (affectedCells.contains(new SpellPatternCalculator.GridCell(monster.currentGridX, monster.currentGridZ))) {
+                        targetsAffected++;
+                        if (rollAmount > 0) monster.stats.heal(rollAmount);
+                    }
                 }
-                // Non-damage spells still "hit" — effects go here
+            } else {
+                // Player cast: heal players (GridPlayerStates) in area
+                for (com.gridifymydungeon.plugin.gridmove.GridPlayerState ps : playerManager.getAllStates()) {
+                    if (ps.npcEntity == null || !ps.npcEntity.isValid()) continue;
+                    if (affectedCells.contains(new SpellPatternCalculator.GridCell(ps.currentGridX, ps.currentGridZ))) {
+                        targetsAffected++;
+                        if (rollAmount > 0) ps.stats.heal(rollAmount);
+                    }
+                }
+            }
+        } else {
+            // Damage spell — always hits monsters
+            for (MonsterState monster : encounterManager.getMonsters()) {
+                if (!monster.isAlive()) continue;
+                if (affectedCells.contains(new SpellPatternCalculator.GridCell(monster.currentGridX, monster.currentGridZ))) {
+                    targetsAffected++;
+                    if (rollAmount > 0) monster.takeDamage(rollAmount);
+                }
             }
         }
+
+        int totalDamage = isHeal ? 0 : rollAmount;
+        int monstersHit = targetsAffected;
 
         // Persistent spell handling
         if (spell.isPersistent()) {
@@ -165,29 +210,42 @@ public class CastFinalCommand extends AbstractPlayerCommand {
         visualManager.clearSpellVisuals(playerRef.getUuid(), world);
         state.clearSpellCastingState();
 
+        // Re-freeze NPC at the cast position so it doesn't teleport if the player
+        // walks around after casting. Auto-unfreezes when player moves to a new grid cell.
+        state.freeze("post_cast");
+        playerRef.sendMessage(Message.raw("[Griddify] NPC holds position — walk to a new cell to move it.").color("#87CEEB"));
+
         // --- Show world event title ---
-        String damageText = totalDamage > 0
-                ? totalDamage + " " + spell.getDamageType().name().toLowerCase() + " damage"
-                : spell.getDescription();
+        String effectText;
+        if (isHeal) {
+            effectText = rollAmount > 0 ? "+" + rollAmount + " HP healed" : spell.getDescription();
+        } else {
+            effectText = totalDamage > 0
+                    ? totalDamage + " " + spell.getDamageType().name().toLowerCase() + " damage"
+                    : spell.getDescription();
+        }
         Message primaryTitle = Message.raw("[ " + spell.getName().toUpperCase() + " ]").color("#FF4500");
-        Message secondaryTitle = Message.raw(damageText).color("#FFD700");
+        Message secondaryTitle = Message.raw(effectText).color("#FFD700");
         EventTitleUtil.showEventTitleToWorld(primaryTitle, secondaryTitle, true, null, 4.0f, 0.5f, 1.0f, store);
 
         // --- Player notification ---
+        String hitLabel = isHeal ? "target(s) healed" : "target(s) hit";
         Message primary = Message.raw("SPELL CAST!").color("#FFD700");
-        Message secondary = Message.raw(spell.getName() + " hit " + monstersHit + " target(s)").color("#FFFFFF");
+        Message secondary = Message.raw(spell.getName() + " → " + monstersHit + " " + hitLabel).color("#FFFFFF");
         ItemWithAllMetadata icon = new ItemStack("Ingredient_Crystal_Yellow", 1).toPacket();
         NotificationUtil.sendNotification(playerRef.getPacketHandler(), primary, secondary, icon, NotificationStyle.Default);
 
         playerRef.sendMessage(Message.raw(""));
         playerRef.sendMessage(Message.raw("===========================================").color("#FFD700"));
         playerRef.sendMessage(Message.raw("  " + spell.getName() + " -> (" + aimGridX + ", " + aimGridZ + ")").color("#FFD700"));
-        if (totalDamage > 0) {
+        if (isHeal && rollAmount > 0) {
+            playerRef.sendMessage(Message.raw("  Healed: " + rollAmount + " HP").color("#00FF7F"));
+        } else if (totalDamage > 0) {
             playerRef.sendMessage(Message.raw("  Damage: " + totalDamage + " " + spell.getDamageType().name().toLowerCase()).color("#FF6B6B"));
         } else {
             playerRef.sendMessage(Message.raw("  Effect applied: " + spell.getDescription()).color("#90EE90"));
         }
-        playerRef.sendMessage(Message.raw("  Monsters hit: " + monstersHit).color("#FFFFFF"));
+        playerRef.sendMessage(Message.raw("  Targets affected: " + monstersHit).color("#FFFFFF"));
         playerRef.sendMessage(Message.raw("  Spell slots remaining: " + state.stats.getRemainingSpellSlots()).color("#87CEEB"));
         playerRef.sendMessage(Message.raw("===========================================").color("#FFD700"));
 

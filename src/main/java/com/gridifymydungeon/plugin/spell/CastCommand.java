@@ -62,7 +62,8 @@ public class CastCommand extends AbstractPlayerCommand {
             playerRef.sendMessage(Message.raw("[Griddify] Choose a class first! Use /GridClass").color("#FF0000"));
             return;
         }
-        if (state.npcEntity == null || !state.npcEntity.isValid()) {
+        // GM controlling a monster uses the monster's position — no personal /gridmove needed
+        if (!isGmControlling && (state.npcEntity == null || !state.npcEntity.isValid())) {
             playerRef.sendMessage(Message.raw("[Griddify] Enable grid movement first! Use /GridMove").color("#FF0000"));
             return;
         }
@@ -105,8 +106,19 @@ public class CastCommand extends AbstractPlayerCommand {
             return;
         }
 
-        int casterGridX = state.currentGridX;
-        int casterGridZ = state.currentGridZ;
+        // When GM is controlling a monster, cast FROM the monster's grid position
+        int casterGridX, casterGridZ;
+        float casterY;
+        if (isGmControlling) {
+            com.gridifymydungeon.plugin.dnd.MonsterState monster = encounterManager.getControlledMonster();
+            casterGridX = monster.currentGridX;
+            casterGridZ = monster.currentGridZ;
+            casterY = monster.spawnY;
+        } else {
+            casterGridX = state.currentGridX;
+            casterGridZ = state.currentGridZ;
+            casterY = state.npcY;
+        }
         SpellPattern pattern = spell.getPattern();
 
         // Initial direction: player's current body yaw (will rotate live for CONE/LINE/WALL)
@@ -114,7 +126,7 @@ public class CastCommand extends AbstractPlayerCommand {
         try { yaw = playerRef.getTransform().getRotation().getY(); } catch (Exception ignored) {}
         Direction8 initialDirection = Direction8.fromYaw(yaw);
 
-        float playerY = getPlayerY(playerRef);
+        float playerY = casterY; // Use NPC/monster ground Y as reference, not raw body height
 
         // -----------------------------------------------------------------------
         // SELF / AURA: instant, no freeze
@@ -124,7 +136,7 @@ public class CastCommand extends AbstractPlayerCommand {
                     pattern, initialDirection, casterGridX, casterGridZ,
                     spell.getRangeGrids(), spell.getAreaGrids());
             visualManager.showSpellArea(playerRef.getUuid(), cells, world, playerY);
-            state.setSpellCastingState(new SpellCastingState(spell, null, initialDirection, casterGridX, casterGridZ));
+            state.setSpellCastingState(new SpellCastingState(spell, null, initialDirection, casterGridX, casterGridZ, casterY));
 
             playerRef.sendMessage(Message.raw("[Griddify] " + spellLabel(spell) + " ready!").color("#FFD700"));
             playerRef.sendMessage(Message.raw("[Griddify] Pattern fires on NPC. Use /CastFinal.").color("#87CEEB"));
@@ -136,7 +148,7 @@ public class CastCommand extends AbstractPlayerCommand {
         // All other patterns: freeze NPC, player walks to aim / rotate
         // -----------------------------------------------------------------------
         state.freeze("casting");
-        state.setSpellCastingState(new SpellCastingState(spell, null, initialDirection, casterGridX, casterGridZ));
+        state.setSpellCastingState(new SpellCastingState(spell, null, initialDirection, casterGridX, casterGridZ, casterY));
 
         // Compute initial overlay
         Set<SpellPatternCalculator.GridCell> initialCells = computeOverlay(
@@ -149,6 +161,9 @@ public class CastCommand extends AbstractPlayerCommand {
 
         if (pattern == SpellPattern.CONE || pattern == SpellPattern.LINE || pattern == SpellPattern.WALL) {
             playerRef.sendMessage(Message.raw("[Griddify] Walk AROUND your NPC to rotate the direction.").color("#87CEEB"));
+        } else if (spell.isMultiTarget()) {
+            playerRef.sendMessage(Message.raw("[Griddify] Multi-target! Walk to each target and type /CastTarget to confirm it.").color("#87CEEB"));
+            playerRef.sendMessage(Message.raw("[Griddify] Targets: 0/" + spell.getMaxTargets() + " | Range: " + spell.getRangeGrids() + " grids").color("#87CEEB"));
         } else {
             playerRef.sendMessage(Message.raw("[Griddify] Range: " + spell.getRangeGrids() + " grids | Walk to aim").color("#87CEEB"));
         }

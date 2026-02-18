@@ -75,7 +75,7 @@ public class GridOverlayManager {
         Model model = cachedPlayerModel != null ? cachedPlayerModel : cachedDefaultModel;
         if (model == null) return false;
         List<ReachableCell> cells = floodFillReachable(world, state, collisionDetector, excludePlayer);
-        spawnCells(world, state, cells, model);
+        spawnCells(world, state, cells, model, 0.02f); // Grid_Player: +0.02 Y offset
         state.gridOverlayEnabled = true;
         System.out.println("[GridMove] [GRID] Player overlay: " + cells.size() + " cells");
         return true;
@@ -94,7 +94,8 @@ public class GridOverlayManager {
         return true;
     }
 
-    /** GM /gridon with no monster — flat 100x100 area map, skipping barriers and fluid. */
+    /** GM /gridon with no monster — flat 100x100 area map, skipping barriers and fluid.
+     *  Grids spawn at ground level found between -3 and -15 blocks below the GM. */
     public static boolean spawnGMMapOverlay(World world, GridPlayerState gmState) {
         ensureModels();
         Model model = cachedDefaultModel;
@@ -102,15 +103,16 @@ public class GridOverlayManager {
 
         int centerX = gmState.currentGridX;
         int centerZ = gmState.currentGridZ;
-        float refY  = gmState.npcY;
+        // Start scanning 3 below GM feet, scan down up to 15 blocks
+        float scanStart = gmState.npcY - 3.0f;
 
         List<ReachableCell> cells = new ArrayList<>();
         for (int dx = -GM_MAP_RADIUS; dx <= GM_MAP_RADIUS; dx++) {
             for (int dz = -GM_MAP_RADIUS; dz <= GM_MAP_RADIUS; dz++) {
                 int gx = centerX + dx;
                 int gz = centerZ + dz;
-                if (isBarrierCell(world, gx, gz, refY)) continue;
-                Float groundY = scanForGround(world, gx, gz, refY + 8.0f);
+                if (isBarrierCell(world, gx, gz, scanStart)) continue;
+                Float groundY = scanForGround(world, gx, gz, scanStart, 15);
                 if (groundY == null) continue;
                 if (hasFluidAbove(world, gx, gz, groundY)) continue;
                 cells.add(new ReachableCell(gx, gz, groundY));
@@ -126,7 +128,13 @@ public class GridOverlayManager {
                                           CollisionDetector collisionDetector, UUID excludePlayer) {
         if (!state.gridOverlayEnabled) return;
         removeGridOverlayEntities(world, state);
-        spawnGridOverlay(world, state, collisionDetector, excludePlayer);
+        // Bug fix: use the correct model (player=blue, monster/GM=grey)
+        if (excludePlayer != null) {
+            // excludePlayer is only set for real players, not GM/monster overlays
+            spawnPlayerGridOverlay(world, state, collisionDetector, excludePlayer);
+        } else {
+            spawnGridOverlay(world, state, collisionDetector, null);
+        }
     }
 
     public static void removeGridOverlay(World world, GridPlayerState state) {
@@ -141,12 +149,17 @@ public class GridOverlayManager {
 
     private static void spawnCells(World world, GridPlayerState state,
                                    List<ReachableCell> cells, Model model) {
+        spawnCells(world, state, cells, model, 0.01f);
+    }
+
+    private static void spawnCells(World world, GridPlayerState state,
+                                   List<ReachableCell> cells, Model model, float yOffset) {
         Store<EntityStore> store = world.getEntityStore().getStore();
         for (ReachableCell cell : cells) {
             // Centre of the 2x2 block: gridX*2 + 1, gridZ*2 + 1
             float cx = (cell.gridX * 2.0f) + 1.0f;
             float cz = (cell.gridZ * 2.0f) + 1.0f;
-            float y  = cell.groundY + 0.01f;
+            float y  = cell.groundY + yOffset;
             Ref<EntityStore> ref = spawnTile(store, model, cx, y, cz);
             state.gridOverlay.add(ref);
         }
@@ -247,8 +260,12 @@ public class GridOverlayManager {
     // ========================================================
 
     private static Float scanForGround(World world, int gridX, int gridZ, float referenceY) {
+        return scanForGround(world, gridX, gridZ, referenceY, 12);
+    }
+
+    private static Float scanForGround(World world, int gridX, int gridZ, float referenceY, int scanDepth) {
         int startY = (int) Math.floor(referenceY);
-        int endY   = startY - 12;
+        int endY   = startY - scanDepth;
         for (int blockY = startY; blockY >= endY; blockY--) {
             boolean hasGround = false;
             float maxHeight = 0;

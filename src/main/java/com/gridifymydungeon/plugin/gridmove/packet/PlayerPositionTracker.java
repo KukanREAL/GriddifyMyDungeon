@@ -78,9 +78,28 @@ public class PlayerPositionTracker {
 
         // Auto-unfreeze only applies to collision-freeze, NOT spell-casting freeze.
         boolean isCasting = state.getSpellCastingState() != null && state.getSpellCastingState().isValid();
-        if (!isCasting && state.isFrozen && newGridX == state.currentGridX && newGridZ == state.currentGridZ) {
+
+        // If a cast state exists but has EXPIRED, clean up visuals and state now.
+        // (CastFinalCommand checks isValid() and clears state, but never clears the red overlay.)
+        if (state.getSpellCastingState() != null && !state.getSpellCastingState().isValid()) {
+            state.clearSpellCastingState();
             state.unfreeze();
-            playerRef.sendMessage(com.hypixel.hytale.server.core.Message.raw("[GridMove] NPC unfrozen!"));
+            world.execute(() -> spellVisualManager.clearSpellVisuals(playerRef.getUuid(), world));
+            playerRef.sendMessage(com.hypixel.hytale.server.core.Message.raw(
+                    "[Griddify] Spell casting timed out — cancelled.").color("#FF6347"));
+        }
+
+        if (!isCasting && state.isFrozen) {
+            if ("post_cast".equals(state.freezeReason)) {
+                // After casting: unfreeze when player moves to a DIFFERENT cell
+                if (newGridX != state.currentGridX || newGridZ != state.currentGridZ) {
+                    state.unfreeze();
+                }
+            } else if (newGridX == state.currentGridX && newGridZ == state.currentGridZ) {
+                // Collision-freeze: player walked back to NPC cell — unfreeze
+                state.unfreeze();
+                playerRef.sendMessage(com.hypixel.hytale.server.core.Message.raw("[GridMove] NPC unfrozen!"));
+            }
         }
 
         // While casting: update player position (rotates CONE/LINE/WALL direction live),

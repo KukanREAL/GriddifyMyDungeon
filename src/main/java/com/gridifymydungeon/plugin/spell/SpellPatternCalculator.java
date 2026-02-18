@@ -97,38 +97,49 @@ public class SpellPatternCalculator {
     }
 
     /**
-     * Calculate cone pattern (15-foot cone = 3 grids, 30-foot = 6 grids, etc.)
-     * Cone expands symmetrically in the facing direction
+     * D&D cone — correct shape for all 8 directions.
+     *
+     * Cardinal (NORTH, length=3):     Diagonal (NORTHEAST, length=3):
+     *   X X X  ← dist 3 (3 wide)       . . X X X  ← dist 3 (3 wide)
+     *   X X X  ← dist 2 (3 wide)       . . X X X  ← dist 2 (3 wide)
+     *   . X .  ← dist 1 (1 wide)       . . . X .  ← dist 1 (1 wide)
+     *   [NPC]                           [NPC]
+     *
+     * Rule: at distance d, halfWidth = min(d-1, floor(length/2)).
+     *
+     * For cardinal directions the perpendicular is computed naturally (-fdz, fdx).
+     * For diagonal directions (where both fdx and fdz are non-zero) we snap the
+     * perpendicular to a purely cardinal axis (zero out the smaller component) so
+     * that each row's cells are horizontally/vertically contiguous on the grid.
      */
     private static Set<GridCell> calculateCone(Direction8 direction, int originX, int originZ, int length) {
         Set<GridCell> cells = new HashSet<>();
 
-        // Get direction vector
-        int dx = direction.getDeltaX();
-        int dz = direction.getDeltaZ();
+        int fdx = direction.getDeltaX();
+        int fdz = direction.getDeltaZ();
 
-        // Add origin
-        cells.add(new GridCell(originX, originZ));
+        // Perpendicular axis: rotate 90° counter-clockwise, then for diagonals snap to cardinal
+        int perpDx = -fdz;
+        int perpDz =  fdx;
 
-        // For each distance from caster
+        // For diagonal directions both fdx and fdz are ±1. The raw perp (1,1) or (-1,1) etc.
+        // spreads cells diagonally, making rows non-contiguous. Snap to E-W spread instead.
+        boolean isDiagonal = (fdx != 0 && fdz != 0);
+        if (isDiagonal) {
+            perpDx = 1;  // always spread East-West for diagonals
+            perpDz = 0;
+        }
+
+        int maxHalf = length / 2;
+
         for (int dist = 1; dist <= length; dist++) {
-            // Width increases as we go farther (cone shape)
-            int width = dist;
+            int halfWidth = Math.min(dist - 1, maxHalf);
 
-            // Center of this "row"
-            int centerX = originX + (dx * dist);
-            int centerZ = originZ + (dz * dist);
+            int cx = originX + fdx * dist;
+            int cz = originZ + fdz * dist;
 
-            cells.add(new GridCell(centerX, centerZ));
-
-            // Add cells perpendicular to direction for width
-            // Perpendicular to direction
-            int perpDx = -dz;
-            int perpDz = dx;
-
-            for (int w = 1; w <= width; w++) {
-                cells.add(new GridCell(centerX + perpDx * w, centerZ + perpDz * w));
-                cells.add(new GridCell(centerX - perpDx * w, centerZ - perpDz * w));
+            for (int side = -halfWidth; side <= halfWidth; side++) {
+                cells.add(new GridCell(cx + perpDx * side, cz + perpDz * side));
             }
         }
 
@@ -136,7 +147,7 @@ public class SpellPatternCalculator {
     }
 
     /**
-     * Calculate line pattern (straight line in direction)
+     * Calculate line pattern — starts 1 cell in front of the caster (does not include caster cell).
      */
     private static Set<GridCell> calculateLine(Direction8 direction, int originX, int originZ, int length) {
         Set<GridCell> cells = new HashSet<>();
@@ -144,7 +155,8 @@ public class SpellPatternCalculator {
         int dx = direction.getDeltaX();
         int dz = direction.getDeltaZ();
 
-        for (int i = 0; i <= length; i++) {
+        // i starts at 1 to skip the caster's own cell
+        for (int i = 1; i <= length; i++) {
             cells.add(new GridCell(originX + dx * i, originZ + dz * i));
         }
 

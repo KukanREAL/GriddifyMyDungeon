@@ -21,6 +21,7 @@ public class SpellCastingState {
     private final SpellData spell;
     private final int casterGridX;
     private final int casterGridZ;
+    private final float casterY;   // ground Y of the caster NPC/monster — used for spell grid placement
     private final long castStartTime;
 
     // For directional spells: direction updates as player walks around NPC
@@ -30,20 +31,37 @@ public class SpellCastingState {
     private int aimGridX;
     private int aimGridZ;
 
+    // Multi-target: list of confirmed target cells (player walks to each and confirms with a key/move)
+    private final java.util.List<GridCell> confirmedTargets = new java.util.ArrayList<>();
+
+    public static class GridCell {
+        public final int x, z;
+        public GridCell(int x, int z) { this.x = x; this.z = z; }
+    }
+
     public SpellCastingState(SpellData spell, MonsterState ignoredTarget,
-                             Direction8 initialDirection, int casterGridX, int casterGridZ) {
+                             Direction8 initialDirection, int casterGridX, int casterGridZ,
+                             float casterY) {
         this.spell = spell;
         this.direction = initialDirection;
         this.casterGridX = casterGridX;
         this.casterGridZ = casterGridZ;
+        this.casterY = casterY;
         this.aimGridX = casterGridX;
         this.aimGridZ = casterGridZ;
         this.castStartTime = System.currentTimeMillis();
     }
 
+    /** Legacy constructor without casterY — defaults to 0 (SpellVisualManager will use npcY fallback) */
+    public SpellCastingState(SpellData spell, MonsterState ignoredTarget,
+                             Direction8 initialDirection, int casterGridX, int casterGridZ) {
+        this(spell, ignoredTarget, initialDirection, casterGridX, casterGridZ, 0f);
+    }
+
     public SpellData getSpell() { return spell; }
     public int getCasterGridX() { return casterGridX; }
     public int getCasterGridZ() { return casterGridZ; }
+    public float getCasterY()   { return casterY; }
     public Direction8 getDirection() { return direction; }
 
     /**
@@ -83,6 +101,22 @@ public class SpellCastingState {
 
     public int getAimGridX() { return aimGridX; }
     public int getAimGridZ() { return aimGridZ; }
+
+    /** For multi-target spells: confirm current aim as a target (up to spell.maxTargets) */
+    public boolean confirmTarget() {
+        int max = spell.getMaxTargets();
+        if (confirmedTargets.size() >= max) return false;
+        // Don't add duplicates
+        for (GridCell c : confirmedTargets) {
+            if (c.x == aimGridX && c.z == aimGridZ) return false;
+        }
+        confirmedTargets.add(new GridCell(aimGridX, aimGridZ));
+        return true;
+    }
+
+    public java.util.List<GridCell> getConfirmedTargets() { return confirmedTargets; }
+    public int getConfirmedTargetCount() { return confirmedTargets.size(); }
+    public boolean hasAllTargets() { return confirmedTargets.size() >= spell.getMaxTargets(); }
 
     /** Cast state expires after 60 seconds */
     public boolean isValid() {
