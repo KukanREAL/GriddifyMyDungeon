@@ -22,198 +22,147 @@ import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import java.util.*;
 
 /**
- * Manages spell range visualization using Grid_Corner_Spell entities (RED)
- * Uses same entity spawning pattern as GridOverlayManager
+ * Manages spell range/area visualization using Grid_Spell entities (red).
+ *
+ * One entity per 2x2 grid cell, centred at the cell's world-space midpoint.
+ * No rotation needed — the texture covers the full 2x2 tile.
  */
 public class SpellVisualManager {
+
     private final GridMoveManager gridManager;
 
-    // Track spawned spell visualization entities per player UUID
     private final Map<UUID, List<Ref<EntityStore>>> playerSpellVisuals = new HashMap<>();
 
-    private static final String SPELL_MODEL_ASSET_ID = "Grid_Corner_Spell";
-    private static final String FALLBACK_MODEL = "Grid_Corner_Flat";
+    private static final String SPELL_MODEL_ID   = "Grid_Spell";
+    private static final String FALLBACK_MODEL_ID = "Grid_Basic";
 
-    private static Model cachedSpellModel = null;
+    private static Model cachedSpellModel    = null;
     private static boolean modelLoadAttempted = false;
-
-    // Same corner offsets as GridOverlayManager
-    private static final float[][] OFFSETS = {
-            {-0.5f, -0.5f},  // NW
-            {+0.5f, -0.5f},  // NE
-            {-0.5f, +0.5f},  // SW
-            {+0.5f, +0.5f},  // SE
-    };
-
-    private static final float[] ROTATIONS = {
-            (float) Math.PI,                // NW: 180°
-            (float) (Math.PI / 2.0),        // NE: 90°
-            (float) (-Math.PI / 2.0),       // SW: 270°
-            0f,                             // SE: 0°
-    };
 
     public SpellVisualManager(GridMoveManager gridManager) {
         this.gridManager = gridManager;
     }
 
+    // ========================================================
+    // PUBLIC API
+    // ========================================================
+
     /**
-     * Show spell range/effect area in RED
-     *
-     * @param playerUUID Player casting spell
-     * @param cells Grid cells to highlight
+     * Show spell area in red. One tile entity per cell, centred in the 2x2 block.
      */
-    public void showSpellArea(UUID playerUUID, Set<SpellPatternCalculator.GridCell> cells, World world, float playerY) {
-        // Clear existing visuals
+    public void showSpellArea(UUID playerUUID, Set<SpellPatternCalculator.GridCell> cells,
+                              World world, float playerY) {
         clearSpellVisuals(playerUUID, world);
 
         Model model = getSpellModel();
         if (model == null) {
-            System.err.println("[Griddify] [SPELL] Failed to load spell visualization model!");
+            System.err.println("[Griddify] [SPELL] Failed to load spell model!");
             return;
         }
 
-        // Use player's actual Y as reference for ground scanning, same as GridOverlayManager.
-        // Fall back to npcY from state if playerY is 0 (uninitialized).
-        float referenceY = playerY;
-        if (referenceY == 0.0f) {
-            for (Map.Entry<UUID, com.gridifymydungeon.plugin.gridmove.GridPlayerState> entry : gridManager.getStateEntries()) {
-                if (entry.getKey().equals(playerUUID)) {
-                    float stateY = entry.getValue().npcY;
-                    if (stateY != 0.0f) referenceY = stateY;
-                    break;
-                }
-            }
-        }
-        if (referenceY == 0.0f) referenceY = 64.0f; // last-resort fallback
+        float referenceY = resolveReferenceY(playerUUID, playerY);
 
         List<Ref<EntityStore>> newVisuals = new ArrayList<>();
         Store<EntityStore> store = world.getEntityStore().getStore();
 
-        // Spawn Grid_Corner_Spell at each cell (RED)
         for (SpellPatternCalculator.GridCell cell : cells) {
-            float centerX = (cell.x * 2.0f) + 1.0f;
-            float centerZ = (cell.z * 2.0f) + 1.0f;
+            // Centre of the 2x2 block
+            float cx = (cell.x * 2.0f) + 1.0f;
+            float cz = (cell.z * 2.0f) + 1.0f;
 
-            // Scan for ground using player's actual Y as reference (matching GridOverlayManager)
             Float groundY = MonsterEntityController.scanForGroundPublic(world, cell.x, cell.z, referenceY);
-            if (groundY == null) {
-                groundY = referenceY; // Fallback to player height
-            }
+            if (groundY == null) groundY = referenceY;
             float y = groundY + 0.01f;
 
-            // Spawn 4 corner entities
-            for (int i = 0; i < 4; i++) {
-                float entityX = centerX + OFFSETS[i][0];
-                float entityZ = centerZ + OFFSETS[i][1];
-
-                Ref<EntityStore> ref = spawnQuarter(store, model, entityX, y, entityZ, ROTATIONS[i]);
-                if (ref != null) {
-                    newVisuals.add(ref);
-                }
-            }
+            Ref<EntityStore> ref = spawnTile(store, model, cx, y, cz);
+            if (ref != null) newVisuals.add(ref);
         }
 
         playerSpellVisuals.put(playerUUID, newVisuals);
-
-        System.out.println("[Griddify] [SPELL] Spawned spell overlay: " + cells.size() +
+        System.out.println("[Griddify] [SPELL] Spell overlay: " + cells.size() +
                 " cells (" + newVisuals.size() + " entities)");
     }
 
-    /**
-     * Spawn single corner entity (same pattern as GridOverlayManager)
-     */
-    private Ref<EntityStore> spawnQuarter(Store<EntityStore> store, Model model,
-                                          float x, float y, float z, float yawRad) {
+    public void clearSpellVisuals(UUID playerUUID, World world) {
+        List<Ref<EntityStore>> visuals = playerSpellVisuals.remove(playerUUID);
+        if (visuals == null) return;
+        Store<EntityStore> store = world.getEntityStore().getStore();
+        for (Ref<EntityStore> ref : visuals) {
+            if (ref != null && ref.isValid()) {
+                try { store.removeEntity(ref, RemoveReason.REMOVE); } catch (Exception ignored) {}
+            }
+        }
+        visuals.clear();
+    }
+
+    public void clearAllSpellVisuals(World world) {
+        for (UUID id : new HashSet<>(playerSpellVisuals.keySet())) clearSpellVisuals(id, world);
+    }
+
+    // ========================================================
+    // HELPERS
+    // ========================================================
+
+    private float resolveReferenceY(UUID playerUUID, float playerY) {
+        if (playerY != 0.0f) return playerY;
+        for (Map.Entry<UUID, com.gridifymydungeon.plugin.gridmove.GridPlayerState> e :
+                gridManager.getStateEntries()) {
+            if (e.getKey().equals(playerUUID)) {
+                float ny = e.getValue().npcY;
+                if (ny != 0.0f) return ny;
+                break;
+            }
+        }
+        return 64.0f;
+    }
+
+    // ========================================================
+    // ENTITY SPAWNING — single tile per cell, no rotation
+    // ========================================================
+
+    private Ref<EntityStore> spawnTile(Store<EntityStore> store, Model model,
+                                       float x, float y, float z) {
         try {
             Holder<EntityStore> holder = EntityStore.REGISTRY.newHolder();
-
-            Vector3d position = new Vector3d(x, y, z);
-            Vector3f rotation = new Vector3f(0, yawRad, 0);
-
-            holder.addComponent(TransformComponent.getComponentType(), new TransformComponent(position, rotation));
+            holder.addComponent(TransformComponent.getComponentType(),
+                    new TransformComponent(new Vector3d(x, y, z), new Vector3f(0, 0, 0)));
             holder.addComponent(ModelComponent.getComponentType(), new ModelComponent(model));
             holder.addComponent(BoundingBox.getComponentType(), new BoundingBox(model.getBoundingBox()));
             holder.addComponent(NetworkId.getComponentType(),
                     new NetworkId(store.getExternalData().takeNextNetworkId()));
             holder.ensureComponent(UUIDComponent.getComponentType());
-
             return store.addEntity(holder, AddReason.SPAWN);
         } catch (Exception e) {
-            System.err.println("[Griddify] [SPELL] Failed to spawn quarter: " + e.getMessage());
+            System.err.println("[Griddify] [SPELL] Failed to spawn tile: " + e.getMessage());
             return null;
         }
     }
 
-    /**
-     * Clear spell visuals for a player
-     */
-    public void clearSpellVisuals(UUID playerUUID, World world) {
-        List<Ref<EntityStore>> visuals = playerSpellVisuals.get(playerUUID);
-        if (visuals != null) {
-            Store<EntityStore> store = world.getEntityStore().getStore();
+    // ========================================================
+    // MODEL LOADING
+    // ========================================================
 
-            for (Ref<EntityStore> ref : visuals) {
-                if (ref != null && ref.isValid()) {
-                    try {
-                        store.removeEntity(ref, RemoveReason.REMOVE);
-                    } catch (Exception e) {
-                        // Ignore
-                    }
-                }
-            }
-            visuals.clear();
-        }
-        playerSpellVisuals.remove(playerUUID);
-    }
-
-    /**
-     * Clear all spell visuals (for cleanup)
-     */
-    public void clearAllSpellVisuals(World world) {
-        for (UUID playerUUID : new HashSet<>(playerSpellVisuals.keySet())) {
-            clearSpellVisuals(playerUUID, world);
-        }
-    }
-
-    /**
-     * Get spell visualization model (RED Grid_Corner_Spell)
-     */
     private static Model getSpellModel() {
-        if (cachedSpellModel != null) {
-            return cachedSpellModel;
-        }
-
-        if (modelLoadAttempted) {
-            return null;
-        }
-
+        if (cachedSpellModel != null) return cachedSpellModel;
+        if (modelLoadAttempted) return null;
         modelLoadAttempted = true;
 
+        cachedSpellModel = loadModel(SPELL_MODEL_ID);
+        if (cachedSpellModel == null) cachedSpellModel = loadModel(FALLBACK_MODEL_ID);
+        return cachedSpellModel;
+    }
+
+    private static Model loadModel(String id) {
         try {
-            System.out.println("[Griddify] [SPELL] Attempting to load Model asset: " + SPELL_MODEL_ASSET_ID);
-
-            ModelAsset modelAsset = ModelAsset.getAssetMap().getAsset(SPELL_MODEL_ASSET_ID);
-            if (modelAsset != null) {
-                cachedSpellModel = Model.createScaledModel(modelAsset, 1.0f);
-                System.out.println("[Griddify] [SPELL] SUCCESS! Loaded Grid_Corner_Spell model");
-                return cachedSpellModel;
+            ModelAsset asset = ModelAsset.getAssetMap().getAsset(id);
+            if (asset != null) {
+                System.out.println("[Griddify] [SPELL] Loaded model: " + id);
+                return Model.createScaledModel(asset, 1.0f);
             }
-
-            System.out.println("[Griddify] [SPELL] Model asset '" + SPELL_MODEL_ASSET_ID + "' not found");
-
-            // Fallback to Grid_Corner_Flat
-            ModelAsset fallback = ModelAsset.getAssetMap().getAsset(FALLBACK_MODEL);
-            if (fallback != null) {
-                cachedSpellModel = Model.createScaledModel(fallback, 1.0f);
-                System.out.println("[Griddify] [SPELL] Using Grid_Corner_Flat fallback");
-                return cachedSpellModel;
-            }
+            System.out.println("[Griddify] [SPELL] Model not found: " + id);
         } catch (Exception e) {
-            System.err.println("[Griddify] [SPELL] Error loading model: " + e.getMessage());
-            e.printStackTrace();
+            System.err.println("[Griddify] [SPELL] Error loading " + id + ": " + e.getMessage());
         }
-
-        System.err.println("[Griddify] [SPELL] All model loading failed");
         return null;
     }
 }

@@ -1,11 +1,10 @@
 package com.gridifymydungeon.plugin.spell;
 
+import com.gridifymydungeon.plugin.dnd.EncounterManager;
+import com.gridifymydungeon.plugin.dnd.MonsterState;
+import com.gridifymydungeon.plugin.dnd.RoleManager;
 import com.gridifymydungeon.plugin.gridmove.GridMoveManager;
 import com.gridifymydungeon.plugin.gridmove.GridPlayerState;
-import com.gridifymydungeon.plugin.spell.ClassType;
-import com.gridifymydungeon.plugin.spell.SpellData;
-import com.gridifymydungeon.plugin.spell.SpellDatabase;
-import com.gridifymydungeon.plugin.spell.SubclassType;
 import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.component.Store;
 import com.hypixel.hytale.server.core.Message;
@@ -19,15 +18,24 @@ import javax.annotation.Nonnull;
 import java.util.List;
 
 /**
- * /ListSpells - Show all spells available to player
- * Shows both base class spells and subclass spells
+ * /ListSpells - Show all actions available to the caller.
+ *
+ * - For regular players: shows their class spells/abilities.
+ * - For GM controlling a monster with no class: shows 3 basic monster attacks.
+ * - For GM controlling a monster WITH a class: shows that class spells + 3 basic attacks.
+ * - For GM not controlling: shows basic monster attacks as reference.
  */
 public class ListSpellsCommand extends AbstractPlayerCommand {
-    private final GridMoveManager playerManager;
 
-    public ListSpellsCommand(GridMoveManager playerManager) {
-        super("ListSpells", "Show all spells available to you");
+    private final GridMoveManager playerManager;
+    private final RoleManager roleManager;
+    private final EncounterManager encounterManager;
+
+    public ListSpellsCommand(GridMoveManager playerManager, RoleManager roleManager, EncounterManager encounterManager) {
+        super("ListSpells", "Show all spells and attacks available to you");
         this.playerManager = playerManager;
+        this.roleManager = roleManager;
+        this.encounterManager = encounterManager;
     }
 
     @Override
@@ -36,7 +44,19 @@ public class ListSpellsCommand extends AbstractPlayerCommand {
 
         GridPlayerState state = playerManager.getState(playerRef);
 
-        // Check if player has a class
+        // ---- GM controlling a monster ----
+        if (roleManager.isGM(playerRef)) {
+            MonsterState controlled = encounterManager.getControlledMonster();
+            if (controlled != null) {
+                showMonsterActions(playerRef, controlled);
+            } else {
+                playerRef.sendMessage(Message.raw("[Griddify] Control a monster first with /control <#>").color("#FFA500"));
+                playerRef.sendMessage(Message.raw("[Griddify] Basic monster attacks: Scratch, Hit, Bow_Shot").color("#CCCCCC"));
+            }
+            return;
+        }
+
+        // ---- Regular player ----
         if (state.stats.getClassType() == null) {
             playerRef.sendMessage(Message.raw("[Griddify] Choose a class first! Use /GridClass").color("#FF0000"));
             return;
@@ -44,102 +64,93 @@ public class ListSpellsCommand extends AbstractPlayerCommand {
 
         ClassType classType = state.stats.getClassType();
         SubclassType subclass = state.stats.getSubclassType();
-        int playerLevel = state.stats.getLevel();
+        int level = state.stats.getLevel();
 
-        // Get all available spells
-        List<SpellData> availableSpells = SpellDatabase.getAvailableSpells(classType, subclass, playerLevel);
+        List<SpellData> available = SpellDatabase.getAvailableSpells(classType, subclass, level);
 
-        if (availableSpells.isEmpty()) {
-            playerRef.sendMessage(Message.raw("[Griddify] No spells available yet!").color("#FF0000"));
-            return;
-        }
-
-        // Display header
+        header(playerRef, "YOUR ACTIONS - " + classType.getDisplayName() + "  Lv." + level);
+        playerRef.sendMessage(Message.raw("  Spell Slots: " + state.stats.getRemainingSpellSlots() + "/" + state.stats.getSpellSlots()).color("#FFA500"));
         playerRef.sendMessage(Message.raw(""));
-        playerRef.sendMessage(Message.raw("═══════════════════════════════════════").color("#FFD700"));
-        playerRef.sendMessage(Message.raw("  YOUR AVAILABLE SPELLS").color("#FFD700"));
-        playerRef.sendMessage(Message.raw("═══════════════════════════════════════").color("#FFD700"));
-        playerRef.sendMessage(Message.raw("  Class: " + classType.getDisplayName()).color("#87CEEB"));
+
+        int base = 0, sub = 0;
+        playerRef.sendMessage(Message.raw("  BASE CLASS SPELLS/ABILITIES:").color("#87CEEB"));
+        for (SpellData spell : available) {
+            if (spell.isBaseClassSpell()) { printSpell(playerRef, spell); base++; }
+        }
+        if (base == 0) playerRef.sendMessage(Message.raw("    (none available yet)").color("#808080"));
+        playerRef.sendMessage(Message.raw(""));
 
         if (subclass != null) {
-            playerRef.sendMessage(Message.raw("  Subclass: " + subclass.getDisplayName()).color("#9370DB"));
-        } else {
-            playerRef.sendMessage(Message.raw("  Subclass: None (unlock at level 3)").color("#808080"));
-        }
-
-        playerRef.sendMessage(Message.raw("  Level: " + playerLevel).color("#00FF00"));
-        playerRef.sendMessage(Message.raw("  Spell Slots: " + state.stats.getRemainingSpellSlots() +
-                " / " + state.stats.getSpellSlots()).color("#FFA500"));
-        playerRef.sendMessage(Message.raw("═══════════════════════════════════════").color("#FFD700"));
-        playerRef.sendMessage(Message.raw(""));
-
-        // Group spells by type
-        int baseClassCount = 0;
-        int subclassCount = 0;
-
-        // First show base class spells
-        playerRef.sendMessage(Message.raw("  ▸ BASE CLASS SPELLS:").color("#87CEEB"));
-        for (SpellData spell : availableSpells) {
-            if (spell.isBaseClassSpell()) {
-                displaySpell(playerRef, spell);
-                baseClassCount++;
+            playerRef.sendMessage(Message.raw("  SUBCLASS: " + subclass.getDisplayName()).color("#9370DB"));
+            for (SpellData spell : available) {
+                if (spell.isSubclassSpell()) { printSpell(playerRef, spell); sub++; }
             }
+            if (sub == 0) playerRef.sendMessage(Message.raw("    (none available yet)").color("#808080"));
+            playerRef.sendMessage(Message.raw(""));
         }
 
-        if (baseClassCount == 0) {
-            playerRef.sendMessage(Message.raw("    (None available)").color("#808080"));
-        }
-
-        playerRef.sendMessage(Message.raw(""));
-
-        // Then show subclass spells
-        if (subclass != null) {
-            playerRef.sendMessage(Message.raw("  ▸ SUBCLASS SPELLS:").color("#9370DB"));
-            for (SpellData spell : availableSpells) {
-                if (spell.isSubclassSpell()) {
-                    displaySpell(playerRef, spell);
-                    subclassCount++;
-                }
-            }
-
-            if (subclassCount == 0) {
-                playerRef.sendMessage(Message.raw("    (None available yet)").color("#808080"));
-            }
-        }
-
-        // Footer
-        playerRef.sendMessage(Message.raw(""));
-        playerRef.sendMessage(Message.raw("═══════════════════════════════════════").color("#FFD700"));
-        playerRef.sendMessage(Message.raw("  Total: " + availableSpells.size() + " spells available").color("#FFFFFF"));
-        playerRef.sendMessage(Message.raw("  Use /Cast <spell name> to prepare a spell").color("#00FF00"));
-        playerRef.sendMessage(Message.raw("═══════════════════════════════════════").color("#FFD700"));
+        footer(playerRef, available.size());
     }
 
-    /**
-     * Display a single spell
-     */
-    private void displaySpell(PlayerRef playerRef, SpellData spell) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("    - ");
-        sb.append(spell.getName());
+    private void showMonsterActions(PlayerRef playerRef, MonsterState monster) {
+        ClassType mClass = monster.stats.getClassType();
 
-        // Add level/cost info
-        if (spell.getSlotCost() > 0) {
-            sb.append(" (Level ").append(spell.getSpellLevel());
-            sb.append(", Cost: ").append(spell.getSlotCost()).append(" slots)");
-        } else {
-            sb.append(" (Cantrip/Ability)");
-        }
-
-        playerRef.sendMessage(Message.raw(sb.toString()).color("#FFFFFF"));
-
-        // Show brief description
-        if (spell.getDamageDice() != null) {
-            playerRef.sendMessage(Message.raw("      > " + spell.getDamageDice() + " " +
-                    spell.getDamageType().name().toLowerCase() + " damage").color("#FF6B6B"));
-        }
-
-        playerRef.sendMessage(Message.raw("      > " + spell.getDescription()).color("#D3D3D3"));
+        header(playerRef, "MONSTER ACTIONS - " + monster.getDisplayName() +
+                (mClass != null ? "  [" + mClass.getDisplayName() + "]" : ""));
         playerRef.sendMessage(Message.raw(""));
+
+        // Always show basic monster attacks
+        playerRef.sendMessage(Message.raw("  BASIC ATTACKS (any monster):").color("#FF8C00"));
+        for (SpellData atk : SpellDatabase.getMonsterAttacks()) {
+            printSpell(playerRef, atk);
+        }
+        playerRef.sendMessage(Message.raw(""));
+
+        // If the monster has a class, show its spells too
+        if (mClass != null) {
+            SubclassType mSub = monster.stats.getSubclassType();
+            int mLevel = Math.max(1, monster.stats.getLevel());
+            List<SpellData> classSpells = SpellDatabase.getAvailableSpells(mClass, mSub, mLevel);
+
+            playerRef.sendMessage(Message.raw("  CLASS SPELLS [" + mClass.getDisplayName() + "]:").color("#87CEEB"));
+            int count = 0;
+            for (SpellData spell : classSpells) {
+                printSpell(playerRef, spell);
+                count++;
+            }
+            if (count == 0) playerRef.sendMessage(Message.raw("    (none at level " + mLevel + ")").color("#808080"));
+            playerRef.sendMessage(Message.raw(""));
+            footer(playerRef, SpellDatabase.getMonsterAttacks().size() + count);
+        } else {
+            playerRef.sendMessage(Message.raw("  Tip: Use /GridClass <class> while controlling to unlock class spells!").color("#808080"));
+            footer(playerRef, SpellDatabase.getMonsterAttacks().size());
+        }
+    }
+
+    private void header(PlayerRef p, String title) {
+        p.sendMessage(Message.raw(""));
+        p.sendMessage(Message.raw("=========================================").color("#FFD700"));
+        p.sendMessage(Message.raw("  " + title).color("#FFD700"));
+        p.sendMessage(Message.raw("=========================================").color("#FFD700"));
+    }
+
+    private void footer(PlayerRef p, int total) {
+        p.sendMessage(Message.raw("  Total: " + total + " actions available").color("#FFFFFF"));
+        p.sendMessage(Message.raw("  Use /Cast <name> to prepare a spell/attack").color("#00FF00"));
+        p.sendMessage(Message.raw("=========================================").color("#FFD700"));
+    }
+
+    private void printSpell(PlayerRef p, SpellData spell) {
+        String cost = spell.getSlotCost() > 0 ? " (Lv." + spell.getSpellLevel() + " | " + spell.getSlotCost() + " slots)" : " (cantrip)";
+        String range = " | range " + (spell.getRangeGrids() > 0 ? spell.getRangeGrids() + "g" : "touch");
+        p.sendMessage(Message.raw("    - " + spell.getName() + cost + range).color("#FFFFFF"));
+        if (spell.getDamageDice() != null) {
+            p.sendMessage(Message.raw("      Dmg: " + spell.getDamageDice() + " " + spell.getDamageType().name().toLowerCase()
+                    + " | " + spell.getPattern().name().toLowerCase()).color("#FF6B6B"));
+        } else {
+            p.sendMessage(Message.raw("      Effect | " + spell.getPattern().name().toLowerCase()).color("#90EE90"));
+        }
+        p.sendMessage(Message.raw("      " + spell.getDescription()).color("#D3D3D3"));
+        p.sendMessage(Message.raw(""));
     }
 }

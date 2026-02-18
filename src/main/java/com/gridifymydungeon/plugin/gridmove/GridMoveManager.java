@@ -226,4 +226,13 @@ public class GridMoveManager {
     public Iterable<GridPlayerState> getAllStates() {
         return playerStates.values();
     }
+
+    /** Get all PlayerRefs currently in the game (for broadcasting messages) */
+    public java.util.List<com.hypixel.hytale.server.core.universe.PlayerRef> getAllPlayerRefs() {
+        java.util.List<com.hypixel.hytale.server.core.universe.PlayerRef> refs = new java.util.ArrayList<>();
+        for (GridPlayerState state : playerStates.values()) {
+            if (state.playerRef != null) refs.add(state.playerRef);
+        }
+        return refs;
+    }
 }

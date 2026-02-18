@@ -61,6 +61,9 @@ public class GridPlayerState {
     // Spell casting state
     private SpellCastingState spellCastingState = null;
 
+    // Action economy: only 1 action (spell/attack) per turn
+    public boolean hasUsedAction = false;
+
     public SpellCastingState getSpellCastingState() { return spellCastingState; }
     public void setSpellCastingState(SpellCastingState state) { this.spellCastingState = state; }
     public void clearSpellCastingState() { this.spellCastingState = null; }
@@ -97,6 +100,7 @@ public class GridPlayerState {
             remainingMoves = maxMoves;
         }
         noMovesMessageShown = false;
+        hasUsedAction = false; // Reset action for new turn
     }
 
     public void freeze(String reason) {

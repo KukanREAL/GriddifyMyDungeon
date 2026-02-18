@@ -14,10 +14,12 @@ public class SpellDatabase {
     private static final Map<String, SpellData> SPELL_MAP = new HashMap<>();
     private static final Map<SubclassType, List<SpellData>> SPELLS_BY_SUBCLASS = new HashMap<>();
     private static final Map<ClassType, List<SpellData>> SPELLS_BY_CLASS = new HashMap<>();
+    private static final List<SpellData> MONSTER_ATTACKS = new java.util.ArrayList<>();
 
     static {
         initializeBaseClassSpells();
         initializeSubclassSpells();
+        initializeMonsterAttacks();
         buildIndices();
     }
 
@@ -951,6 +953,40 @@ public class SpellDatabase {
     /**
      * Register a base class spell
      */
+    private static void initializeMonsterAttacks() {
+        // Universal monster basic attacks — available to any monster controlled by GM
+        MONSTER_ATTACKS.add(new SpellData(
+                "Scratch",
+                0, 1, SpellPattern.SINGLE_TARGET, 0,
+                "1d4", DamageType.SLASHING,
+                (ClassType) null, 1, false, 0,
+                "Basic claw/scratch attack. Melee, 1 grid range."
+        ));
+        MONSTER_ATTACKS.add(new SpellData(
+                "Hit",
+                0, 1, SpellPattern.SINGLE_TARGET, 0,
+                "1d6", DamageType.BLUDGEONING,
+                (ClassType) null, 1, false, 0,
+                "Basic melee strike. 1 grid range."
+        ));
+        MONSTER_ATTACKS.add(new SpellData(
+                "Bow_Shot",
+                0, 10, SpellPattern.SINGLE_TARGET, 0,
+                "1d8", DamageType.PIERCING,
+                (ClassType) null, 1, false, 0,
+                "Ranged attack. Up to 10 grids."
+        ));
+        // Register all monster attacks in SPELL_MAP so /cast works
+        for (SpellData atk : MONSTER_ATTACKS) {
+            SPELL_MAP.put(atk.getName().toLowerCase(), atk);
+        }
+    }
+
+    /** Get universal monster basic attacks */
+    public static List<SpellData> getMonsterAttacks() {
+        return java.util.Collections.unmodifiableList(MONSTER_ATTACKS);
+    }
+
     private static void registerBase(SpellData spell) {
         SPELL_MAP.put(spell.getName().toLowerCase(), spell);
     }

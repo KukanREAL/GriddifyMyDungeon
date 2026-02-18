@@ -266,12 +266,15 @@ public class MonsterEntityController {
 
                     BlockType block = world.getBlockType(new Vector3i(blockX, blockY, blockZ));
 
-                    if (isSolidBlock(block)) {
+                    if (isSolidBlock(block) && !isBarrierBlock(block)) {
                         float blockHeight = getBlockHeight(block);
                         if (blockHeight > maxHeight) {
                             maxHeight = blockHeight;
                         }
                         hasGround = true;
+                    } else if (isBarrierBlock(block)) {
+                        // Barrier present — this cell is blocked, skip it entirely
+                        hasGround = false;
                     }
                 }
             }
@@ -401,6 +404,15 @@ public class MonsterEntityController {
     private static boolean isSolidBlock(BlockType block) {
         if (block == null) return false;
         return block.getMaterial() == BlockMaterial.Solid;
+    }
+
+    /**
+     * Barrier blocks are invisible walls — entities cannot stand on or inside them.
+     * Identified by block ID containing "barrier" (case-insensitive).
+     */
+    private static boolean isBarrierBlock(BlockType block) {
+        return block != null && block.getId() != null &&
+                block.getId().toLowerCase().contains("barrier");
     }
 
     private static float getBlockHeight(BlockType block) {

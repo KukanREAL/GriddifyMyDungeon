@@ -83,44 +83,47 @@ public class PlayerPositionTracker {
             playerRef.sendMessage(com.hypixel.hytale.server.core.Message.raw("[GridMove] NPC unfrozen!"));
         }
 
-        // While casting: update aim and move the spell indicator, OR cancel if out of range.
+        // While casting: update player position (rotates CONE/LINE/WALL direction live),
+        // refresh the red overlay, and cancel targeted spells if the player walks out of range.
         if (isCasting && spellVisualManager != null) {
             com.gridifymydungeon.plugin.spell.SpellCastingState castState = state.getSpellCastingState();
             if (castState != null && (castState.getAimGridX() != newGridX || castState.getAimGridZ() != newGridZ)) {
-                int distFromCaster = com.gridifymydungeon.plugin.spell.SpellPatternCalculator.getDistance(
-                        castState.getCasterGridX(), castState.getCasterGridZ(), newGridX, newGridZ);
-                int spellRange = castState.getSpell().getRangeGrids();
+                com.gridifymydungeon.plugin.spell.SpellPattern pattern = castState.getSpell().getPattern();
 
-                if (spellRange > 0 && distFromCaster > spellRange) {
-                    // Out of range — cancel spell and clear the red grid immediately
-                    state.clearSpellCastingState();
-                    state.unfreeze();
-                    world.execute(() -> spellVisualManager.clearSpellVisuals(playerRef.getUuid(), world));
-                    playerRef.sendMessage(com.hypixel.hytale.server.core.Message.raw(
-                            "[Griddify] Out of range — spell cancelled!").color("#FF0000"));
-                } else {
-                    // Still in range — update aim and refresh the indicator
-                    castState.updateAim(newGridX, newGridZ);
-                    final int aimX = newGridX;
-                    final int aimZ = newGridZ;
-                    final float aimY = (float) newPosition.getY();
-                    final com.gridifymydungeon.plugin.spell.SpellPattern pattern = castState.getSpell().getPattern();
+                // NPC-origin directional patterns: player walks AROUND the NPC to rotate, no range limit
+                boolean isDirectional = (pattern == com.gridifymydungeon.plugin.spell.SpellPattern.CONE ||
+                        pattern == com.gridifymydungeon.plugin.spell.SpellPattern.LINE ||
+                        pattern == com.gridifymydungeon.plugin.spell.SpellPattern.WALL ||
+                        pattern == com.gridifymydungeon.plugin.spell.SpellPattern.SELF ||
+                        pattern == com.gridifymydungeon.plugin.spell.SpellPattern.AURA);
+
+                if (!isDirectional) {
+                    // Targeted spell — cancel if out of range
+                    int dist = SpellPatternCalculator.getDistance(
+                            castState.getCasterGridX(), castState.getCasterGridZ(), newGridX, newGridZ);
+                    int range = castState.getSpell().getRangeGrids();
+                    if (range > 0 && dist > range) {
+                        state.clearSpellCastingState();
+                        state.unfreeze();
+                        world.execute(() -> spellVisualManager.clearSpellVisuals(playerRef.getUuid(), world));
+                        playerRef.sendMessage(com.hypixel.hytale.server.core.Message.raw(
+                                "[Griddify] Out of range - spell cancelled!").color("#FF0000"));
+                    }
+                }
+
+                // If still casting after the range check, update position and redraw overlay
+                if (state.getSpellCastingState() != null) {
+                    castState.updatePlayerPosition(newGridX, newGridZ); // updates direction for CONE/LINE/WALL
+                    final int px = newGridX, pz = newGridZ;
+                    final float py = (float) newPosition.getY();
                     final com.gridifymydungeon.plugin.spell.Direction8 dir = castState.getDirection();
-                    spellRange = castState.getSpell().getRangeGrids();
-                    final int areaGrids = castState.getSpell().getAreaGrids();
-                    int finalSpellRange = spellRange;
+                    final com.gridifymydungeon.plugin.spell.SpellData spellData = castState.getSpell();
+                    final int cx = castState.getCasterGridX(), cz = castState.getCasterGridZ();
                     world.execute(() -> {
-                        java.util.Set<SpellPatternCalculator.GridCell> cells;
-                        if (pattern == com.gridifymydungeon.plugin.spell.SpellPattern.SINGLE_TARGET) {
-                            // Single cell follows the player
-                            cells = new java.util.HashSet<>();
-                            cells.add(new SpellPatternCalculator.GridCell(aimX, aimZ));
-                        } else {
-                            // Area spells: show full pattern preview centred on the aimed cell
-                            cells = SpellPatternCalculator.calculatePattern(
-                                    pattern, dir, aimX, aimZ, finalSpellRange, areaGrids);
-                        }
-                        spellVisualManager.showSpellArea(playerRef.getUuid(), cells, world, aimY);
+                        java.util.Set<SpellPatternCalculator.GridCell> cells =
+                                com.gridifymydungeon.plugin.spell.CastCommand.computeOverlay(
+                                        pattern, dir, cx, cz, spellData, px, pz);
+                        spellVisualManager.showSpellArea(playerRef.getUuid(), cells, world, py);
                     });
                 }
             }

@@ -16,6 +16,7 @@ public class CombatManager {
     private boolean combatActive = false;
     private List<CombatParticipant> turnOrder = new ArrayList<>();
     private int currentTurnIndex = 0;
+    private int roundNumber = 0;
 
     public CombatManager(GridMoveManager playerManager, EncounterManager encounterManager, RoleManager roleManager) {
         this.playerManager = playerManager;
@@ -46,6 +47,7 @@ public class CombatManager {
     public List<CombatParticipant> startCombat() {
         turnOrder.clear();
         currentTurnIndex = 0;
+        roundNumber = 1;
 
         System.out.println("[Griddify] [COMBAT] Rolling initiative for all participants...");
 
@@ -105,6 +107,7 @@ public class CombatManager {
         combatActive = false;
         turnOrder.clear();
         currentTurnIndex = 0;
+        roundNumber = 0;
         System.out.println("[Griddify] [COMBAT] Combat ended");
     }
 
@@ -116,7 +119,8 @@ public class CombatManager {
         currentTurnIndex++;
         if (currentTurnIndex >= turnOrder.size()) {
             currentTurnIndex = 0;
-            System.out.println("[Griddify] [COMBAT] Round complete! Starting new round.");
+            roundNumber++;
+            System.out.println("[Griddify] [COMBAT] Round " + roundNumber + " started!");
         }
 
         CombatParticipant current = getCurrentParticipant();
@@ -162,6 +166,14 @@ public class CombatManager {
 
     public boolean isCombatActive() {
         return combatActive;
+    }
+
+    public int getCurrentTurnIndex() {
+        return currentTurnIndex;
+    }
+
+    public int getRoundNumber() {
+        return roundNumber;
     }
 
     public List<CombatParticipant> getTurnOrder() {

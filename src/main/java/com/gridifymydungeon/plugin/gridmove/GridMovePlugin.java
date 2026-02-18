@@ -127,10 +127,13 @@ public class GridMovePlugin extends JavaPlugin {
         getCommandRegistry().registerCommand(new GridNullCommand(roleManager));
         getCommandRegistry().registerCommand(new GridRestartCommand(roleManager));
 
+        // Combat command declared early so EndTurnCommand can reference it
+        CombatCommand combatCommand = new CombatCommand(roleManager, combatManager, gridMoveManager);
+
         // Player commands
         getCommandRegistry().registerCommand(new GridMoveCommand(gridMoveManager, collisionDetector, roleManager));
         getCommandRegistry().registerCommand(new MaxTurnsCommand(gridMoveManager));
-        getCommandRegistry().registerCommand(new EndTurnCommand(gridMoveManager, combatManager));
+        getCommandRegistry().registerCommand(new EndTurnCommand(gridMoveManager, combatManager, combatCommand));
         getCommandRegistry().registerCommand(new GridCamCommand());
         getCommandRegistry().registerCommand(new ClearHologramsCommand(gridMoveManager));
         getCommandRegistry().registerCommand(new GridOnCommand(gridMoveManager, collisionDetector, encounterManager, roleManager));
@@ -165,7 +168,7 @@ public class GridMovePlugin extends JavaPlugin {
 
         // Combat commands
         getCommandRegistry().registerCommand(new InitivCommand(roleManager, combatManager));
-        getCommandRegistry().registerCommand(new CombatCommand(roleManager, combatManager));
+        getCommandRegistry().registerCommand(combatCommand);
         getCommandRegistry().registerCommand(new CriticalCommand(roleManager, combatSettings));
 
         // Preset commands - FIXED: GridPresetsCommand renamed to GridClassesCommand
@@ -185,8 +188,8 @@ public class GridMovePlugin extends JavaPlugin {
         PersistentSpellManager persistentSpellManager = new PersistentSpellManager();
 
         // Spell casting commands - FIXED: Removed extra arguments
-        getCommandRegistry().registerCommand(new ListSpellsCommand(gridMoveManager));
-        getCommandRegistry().registerCommand(new CastCommand(gridMoveManager, encounterManager, spellVisualManager));
+        getCommandRegistry().registerCommand(new ListSpellsCommand(gridMoveManager, roleManager, encounterManager));
+        getCommandRegistry().registerCommand(new CastCommand(gridMoveManager, encounterManager, spellVisualManager, roleManager));
         getCommandRegistry().registerCommand(new CastFinalCommand(gridMoveManager, encounterManager, spellVisualManager, combatSettings));
         getCommandRegistry().registerCommand(new CastCancelCommand(gridMoveManager, spellVisualManager));
 

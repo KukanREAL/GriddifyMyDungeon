@@ -13,7 +13,7 @@ import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import javax.annotation.Nonnull;
 
 /**
- * /gridhelp - Display all available commands organized by role
+ * /gridhelp - Display all available commands organized by role.
  */
 public class GridHelpCommand extends AbstractPlayerCommand {
 
@@ -31,103 +31,97 @@ public class GridHelpCommand extends AbstractPlayerCommand {
         boolean isGM = roleManager.isGM(playerRef);
         boolean isPlayer = roleManager.isPlayer(playerRef);
 
-        // Header
         playerRef.sendMessage(Message.raw(""));
         playerRef.sendMessage(Message.raw("=========================================").color("#FFD700"));
         playerRef.sendMessage(Message.raw("         GRIDDIFY COMMANDS").color("#00FFFF"));
         playerRef.sendMessage(Message.raw("=========================================").color("#FFD700"));
 
-        // Role status
-        if (isGM) {
-            playerRef.sendMessage(Message.raw("Your Role: GAME MASTER").color("#FF0000"));
-        } else if (isPlayer) {
-            int playerNum = roleManager.getPlayerNumber(playerRef);
-            playerRef.sendMessage(Message.raw("Your Role: Player " + playerNum).color("#00FF00"));
-        } else {
-            playerRef.sendMessage(Message.raw("No role assigned - Use /GridGM or /GridPlayer").color("#808080"));
-        }
+        if (isGM)         playerRef.sendMessage(Message.raw("Your Role: GAME MASTER").color("#FF4500"));
+        else if (isPlayer) playerRef.sendMessage(Message.raw("Your Role: Player " + roleManager.getPlayerNumber(playerRef)).color("#00FF00"));
+        else               playerRef.sendMessage(Message.raw("No role - Use /GridGM or /GridPlayer").color("#808080"));
         playerRef.sendMessage(Message.raw(""));
 
-        // SETUP COMMANDS
-        playerRef.sendMessage(Message.raw("SETUP COMMANDS").color("#FFD700"));
-        sendCommand(playerRef, "/GridGM", "Become the Game Master", "#FF6347");
-        sendCommand(playerRef, "/GridPlayer", "Become a numbered Player", "#90EE90");
+        // SETUP
+        section(playerRef, "SETUP");
+        cmd(playerRef, "/GridGM",         "Become the Game Master");
+        cmd(playerRef, "/GridPlayer",     "Become a numbered Player");
+        cmd(playerRef, "/GridNull",       "Revoke your role");
+        cmd(playerRef, "/GridRestart",    "Reset all roles (GM only)");
         playerRef.sendMessage(Message.raw(""));
-
-        // SETUP COMMANDS section
-        sendCommand(playerRef, "/GridNull", "Revoke your current role", "#FF6347");
-        sendCommand(playerRef, "/GridRestart", "Reset all roles (GM only)", "#FFD700");
 
         // PLAYER COMMANDS
-        playerRef.sendMessage(Message.raw("PLAYER COMMANDS").color("#00FF00"));
-        playerRef.sendMessage(Message.raw("Movement:").color("#00BFFF"));
-        sendCommand(playerRef, "/gridmove", "Activate/deactivate grid", "#FFFFFF");
-        sendCommand(playerRef, "/gridon", "Show movement range", "#FFFFFF");
-        sendCommand(playerRef, "/gridoff", "Hide range overlay", "#FFFFFF");
-        sendCommand(playerRef, "/maxmoves <n>", "Set max moves per turn", "#FFFFFF");
-        sendCommand(playerRef, "/endturn", "End turn & reset moves", "#FFFFFF");
-        sendCommand(playerRef, "/gridcam <0|1>", "Switch camera view", "#FFFFFF");
-        playerRef.sendMessage(Message.raw("Stats:").color("#00BFFF"));
-        sendCommand(playerRef, "/STR /DEX /CON /INT /WIS /CHA", "Set ability scores (0-30)", "#FFFFFF");
-        sendCommand(playerRef, "/HP <1-999>", "Set max HP", "#FFFFFF");
-        sendCommand(playerRef, "/ARMOR <1-50>", "Set armor class", "#FFFFFF");
-        sendCommand(playerRef, "/INITIATIVE <-10 to +10>", "Set initiative", "#FFFFFF");
-        sendCommand(playerRef, "/flying", "Toggle flying mode", "#FFFFFF");
-        playerRef.sendMessage(Message.raw("Presets:").color("#00BFFF"));
-        sendCommand(playerRef, "/GridPresets", "List all class presets", "#FFFFFF");
-        sendCommand(playerRef, "/GridPreset <class>", "Apply preset", "#FFFFFF");
-        sendCommand(playerRef, "/gridprofile", "View your character profile", "#FFFFFF");
-        sendCommand(playerRef, "/gridregister", "Generate character code", "#FFFFFF");
-        sendCommand(playerRef, "/gridlogin <code>", "Load character from code", "#FFFFFF");
+        section(playerRef, "PLAYER COMMANDS");
+        playerRef.sendMessage(Message.raw("  Movement:").color("#00BFFF"));
+        cmd(playerRef, "/gridmove",       "Activate/deactivate NPC");
+        cmd(playerRef, "/gridon",         "Show movement overlay");
+        cmd(playerRef, "/gridoff",        "Hide overlay");
+        cmd(playerRef, "/maxmoves <n>",   "Set max moves per turn");
+        cmd(playerRef, "/endturn",        "End turn & reset moves");
+        cmd(playerRef, "/gridcam <0|1>",  "Switch camera view");
+        playerRef.sendMessage(Message.raw("  Class & Stats:").color("#00BFFF"));
+        cmd(playerRef, "/GridClass <c>",  "Choose class (Cleric, Wizard...)");
+        cmd(playerRef, "/GridSubclass <s>","Choose subclass (level 3+)");
+        cmd(playerRef, "/GridClasses",    "List all classes");
+        cmd(playerRef, "/GridPresets",    "List class presets");
+        cmd(playerRef, "/gridprofile",    "View character profile");
+        cmd(playerRef, "/LevelUp",        "Level up your character");
+        cmd(playerRef, "/LevelDown",      "Level down your character");
+        cmd(playerRef, "/STR /DEX /CON",  "Set ability scores");
+        cmd(playerRef, "/HP /ARMOR /INITIATIVE", "Set combat stats");
+        cmd(playerRef, "/flying",         "Toggle flying mode");
+        playerRef.sendMessage(Message.raw("  Spells & Actions:").color("#00BFFF"));
+        cmd(playerRef, "/ListSpells",     "Show available spells/attacks");
+        cmd(playerRef, "/Cast <spell>",   "Prepare a spell (NPC freezes)");
+        cmd(playerRef, "/CastFinal",      "Fire the prepared spell");
+        cmd(playerRef, "/CastCancel",     "Cancel prepared spell");
+        playerRef.sendMessage(Message.raw("  How casting works:").color("#808080"));
+        playerRef.sendMessage(Message.raw("    1. /Cast <name>  ->  NPC freezes").color("#808080"));
+        playerRef.sendMessage(Message.raw("    2. Walk body to aim (or around NPC for CONE/LINE)").color("#808080"));
+        playerRef.sendMessage(Message.raw("    3. /CastFinal  ->  spell fires, NPC unfreezes").color("#808080"));
         playerRef.sendMessage(Message.raw(""));
 
         // GM COMMANDS
-        playerRef.sendMessage(Message.raw("GM COMMANDS").color("#FF0000"));
-        playerRef.sendMessage(Message.raw("Monsters:").color("#FFA500"));
-        sendCommand(playerRef, "/creature <name> <#>", "Spawn a monster", "#FFFFFF");
-        sendCommand(playerRef, "/control <#>", "Control monster (0=stop)", "#FFFFFF");
-        sendCommand(playerRef, "/slain <#>", "Remove slain monster", "#FFFFFF");
-        sendCommand(playerRef, "/gridon", "Show monster range", "#FFFFFF");
-        playerRef.sendMessage(Message.raw("Combat:").color("#FFA500"));
-        sendCommand(playerRef, "/initiv", "Roll initiative for all", "#FFFFFF");
-        sendCommand(playerRef, "/combat", "Start/end combat mode", "#FFFFFF");
-        sendCommand(playerRef, "/Critical", "Toggle critical rolls", "#FFFFFF");
-        playerRef.sendMessage(Message.raw("Monster Stats:").color("#FFA500"));
-        sendCommand(playerRef, "/STR /DEX /CON etc.", "Set monster stats", "#FFFFFF");
-        sendCommand(playerRef, "/GridPreset <class>", "Apply preset to monster", "#FFFFFF");
-        sendCommand(playerRef, "/flying", "Toggle monster flying", "#FFFFFF");
+        section(playerRef, "GM COMMANDS");
+        playerRef.sendMessage(Message.raw("  Monsters:").color("#FFA500"));
+        cmd(playerRef, "/creature <n> <#>","Spawn a monster");
+        cmd(playerRef, "/control <#>",    "Control monster (0=stop)");
+        cmd(playerRef, "/slain <#>",      "Remove slain monster");
+        cmd(playerRef, "/GridClass <c>",  "Set monster class while controlling");
+        playerRef.sendMessage(Message.raw("  Monster Actions:").color("#FFA500"));
+        cmd(playerRef, "/ListSpells",     "Show monster actions when controlling");
+        cmd(playerRef, "/Cast <attack>",  "Use Scratch / Hit / Bow_Shot");
+        cmd(playerRef, "/CastFinal",      "Fire the attack");
+        playerRef.sendMessage(Message.raw("  Combat:").color("#FFA500"));
+        cmd(playerRef, "/combat",         "Start/end combat (broadcasts to all)");
+        cmd(playerRef, "/initiv",         "Roll initiative for all");
+        cmd(playerRef, "/endturn",        "Advance turn (broadcasts turn order)");
+        cmd(playerRef, "/Critical",       "Toggle critical rolls");
         playerRef.sendMessage(Message.raw(""));
 
-        // SHARED COMMANDS
-        playerRef.sendMessage(Message.raw("SHARED COMMANDS (Player & GM)").color("#00FFFF"));
-        playerRef.sendMessage(Message.raw("Dice:").color("#00BFFF"));
-        sendCommand(playerRef, "/dice <2-100>", "Roll a dice", "#FFFFFF");
-        sendCommand(playerRef, "/AdDice <2-100>", "Roll with advantage", "#FFFFFF");
-        sendCommand(playerRef, "/DisDice <2-100>", "Roll with disadvantage", "#FFFFFF");
-        playerRef.sendMessage(Message.raw("Utility:").color("#00BFFF"));
-        sendCommand(playerRef, "/clearholograms", "Remove all holograms", "#FFFFFF");
-        sendCommand(playerRef, "/gridhelp", "Show this help menu", "#FFFFFF");
+        // SHARED
+        section(playerRef, "SHARED COMMANDS");
+        cmd(playerRef, "/dice <2-100>",   "Roll a dice");
+        cmd(playerRef, "/AdDice <n>",     "Roll with advantage");
+        cmd(playerRef, "/DisDice <n>",    "Roll with disadvantage");
+        cmd(playerRef, "/clearholograms", "Remove all holograms");
+        cmd(playerRef, "/gridhelp",       "Show this menu");
         playerRef.sendMessage(Message.raw(""));
 
-        // Footer
         playerRef.sendMessage(Message.raw("=========================================").color("#FFD700"));
-        if (isGM) {
-            playerRef.sendMessage(Message.raw("Tip: /creature spawn, /control move, /combat start").color("#FFA500"));
-        } else if (isPlayer) {
-            playerRef.sendMessage(Message.raw("Tip: /gridmove, /gridon, /GridPreset for quick setup").color("#90EE90"));
-        } else {
-            playerRef.sendMessage(Message.raw("Start: Choose /GridGM or /GridPlayer first!").color("#00BFFF"));
-        }
+        if (isGM)         playerRef.sendMessage(Message.raw("Tip: /creature bat 1 -> /combat -> /control 1 -> /ListSpells").color("#FFA500"));
+        else if (isPlayer) playerRef.sendMessage(Message.raw("Tip: /GridClass Cleric -> /Cast Sacred_Flame -> /CastFinal").color("#90EE90"));
+        else               playerRef.sendMessage(Message.raw("Start: /GridGM or /GridPlayer").color("#00BFFF"));
         playerRef.sendMessage(Message.raw(""));
 
         System.out.println("[Griddify] [HELP] " + playerRef.getUsername() + " viewed help menu");
     }
 
-    /**
-     * Send a formatted command line
-     */
-    private void sendCommand(PlayerRef playerRef, String command, String description, String color) {
-        playerRef.sendMessage(Message.raw("  " + command).color("#FFD700")
-                .insert(Message.raw(" - " + description).color(color)));
+    private void section(PlayerRef p, String title) {
+        p.sendMessage(Message.raw(title).color("#FFD700"));
+    }
+
+    private void cmd(PlayerRef p, String command, String description) {
+        p.sendMessage(Message.raw("  " + command).color("#FFD700")
+                .insert(Message.raw(" - " + description).color("#FFFFFF")));
     }
 }

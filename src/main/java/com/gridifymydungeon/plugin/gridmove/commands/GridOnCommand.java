@@ -23,8 +23,13 @@ import com.hypixel.hytale.server.core.util.NotificationUtil;
 import javax.annotation.Nonnull;
 
 /**
- * /gridon - Show grid overlay
- * UPDATED: Uses popup notifications instead of chat messages
+ * /gridon — Show grid overlay.
+ *
+ * PLAYER: blue Grid_Corner_Player tiles showing BFS movement range.
+ *
+ * GM + /control active: grey Grid_Corner_Flat tiles showing monster movement range.
+ * GM + no control:      grey 100x100 flat area map around GM position.
+ *                       Barrier blocks and fluid cells are skipped.
  */
 public class GridOnCommand extends AbstractPlayerCommand {
 
@@ -46,128 +51,75 @@ public class GridOnCommand extends AbstractPlayerCommand {
     protected void execute(@Nonnull CommandContext context, @Nonnull Store<EntityStore> store,
                            @Nonnull Ref<EntityStore> ref, @Nonnull PlayerRef playerRef, @Nonnull World world) {
 
+        // ---- GM path ----
         if (roleManager.isGM(playerRef)) {
-            MonsterState monster = encounterManager.getControlledMonster();
-            if (monster == null) {
-                // ERROR: No monster controlled
-                Message primary = Message.raw("Control a monster first!").color("#FF0000");
-                Message secondary = Message.raw("Use /control <number>").color("#FF6B6B");
-                ItemWithAllMetadata icon = new ItemStack("Ingredient_Crystal_Red", 1).toPacket();
-
-                NotificationUtil.sendNotification(
-                        playerRef.getPacketHandler(),
-                        primary,
-                        secondary,
-                        icon,
-                        NotificationStyle.Default
-                );
-                return;
-            }
-
             GridPlayerState gmState = gridMoveManager.getState(playerRef);
-            gmState.currentGridX = monster.currentGridX;
-            gmState.currentGridZ = monster.currentGridZ;
-            gmState.npcY = monster.spawnY;
-            gmState.remainingMoves = monster.remainingMoves;
-            gmState.maxMoves = monster.maxMoves;
 
             if (gmState.gridOverlayEnabled) {
-                // WARNING: Already active
-                Message primary = Message.raw("Grid overlay already active").color("#FFA500");
-                ItemWithAllMetadata icon = new ItemStack("Ingredient_Crystal_Yellow", 1).toPacket();
-
-                NotificationUtil.sendNotification(
-                        playerRef.getPacketHandler(),
-                        primary,
-                        null,
-                        icon,
-                        NotificationStyle.Default
-                );
+                notify(playerRef, "Grid overlay already active", null, "#FFA500", "Ingredient_Crystal_Yellow");
                 return;
             }
 
-            world.execute(() -> {
-                // Spawn grid overlay
-                GridOverlayManager.spawnGridOverlay(world, gmState, collisionDetector, null);
+            MonsterState monster = encounterManager.getControlledMonster();
 
-                // SUCCESS: Grid enabled for monster
-                Message primary = Message.raw("Grid overlay enabled!").color("#90EE90");
-                Message secondary = Message.raw("Showing " + monster.getDisplayName() + "'s range").color("#FFFFFF");
-                ItemWithAllMetadata icon = new ItemStack("Ingredient_Crystal_Green", 1).toPacket();
+            if (monster != null) {
+                // Monster movement range overlay
+                gmState.currentGridX = monster.currentGridX;
+                gmState.currentGridZ = monster.currentGridZ;
+                gmState.npcY         = monster.spawnY;
+                gmState.remainingMoves = monster.remainingMoves;
+                gmState.maxMoves       = monster.maxMoves;
 
-                NotificationUtil.sendNotification(
-                        playerRef.getPacketHandler(),
-                        primary,
-                        secondary,
-                        icon,
-                        NotificationStyle.Default
-                );
-            });
+                world.execute(() -> {
+                    GridOverlayManager.spawnGridOverlay(world, gmState, collisionDetector, null);
+                    notify(playerRef, "Grid overlay enabled!", "Showing " + monster.getDisplayName() + "'s range",
+                            "#90EE90", "Ingredient_Crystal_Green");
+                });
+                System.out.println("[Griddify] [GRIDON] GM monster range overlay for " + monster.getDisplayName());
 
-            System.out.println("[Griddify] [GRIDON] GM enabled overlay for " + monster.getDisplayName());
+            } else {
+                // 100x100 area map — needs GM's current grid position
+                // Use npcY if available, otherwise send a message asking for position
+                world.execute(() -> {
+                    GridOverlayManager.spawnGMMapOverlay(world, gmState);
+                    notify(playerRef, "100x100 area map spawned!",
+                            "Barriers and fluids excluded", "#90EE90", "Ingredient_Crystal_Green");
+                });
+                System.out.println("[Griddify] [GRIDON] GM spawned 100x100 map overlay");
+            }
             return;
         }
 
+        // ---- Player path ----
         GridPlayerState state = gridMoveManager.getState(playerRef);
 
         if (state.npcEntity == null || !state.npcEntity.isValid()) {
-            // ERROR: GridMove not active
-            Message primary = Message.raw("Activate /gridmove first!").color("#FF0000");
-            Message secondary = Message.raw("You need to spawn your character").color("#FF6B6B");
-            ItemWithAllMetadata icon = new ItemStack("Ingredient_Crystal_Red", 1).toPacket();
-
-            NotificationUtil.sendNotification(
-                    playerRef.getPacketHandler(),
-                    primary,
-                    secondary,
-                    icon,
-                    NotificationStyle.Default
-            );
+            notify(playerRef, "Activate /gridmove first!", "You need to spawn your character",
+                    "#FF0000", "Ingredient_Crystal_Red");
             return;
         }
 
         if (state.gridOverlayEnabled) {
-            // WARNING: Already active
-            Message primary = Message.raw("Grid overlay already active").color("#FFA500");
-            ItemWithAllMetadata icon = new ItemStack("Ingredient_Crystal_Yellow", 1).toPacket();
-
-            NotificationUtil.sendNotification(
-                    playerRef.getPacketHandler(),
-                    primary,
-                    null,
-                    icon,
-                    NotificationStyle.Default
-            );
+            notify(playerRef, "Grid overlay already active", null, "#FFA500", "Ingredient_Crystal_Yellow");
             return;
         }
 
         world.execute(() -> {
-            // Spawn grid overlay
-            GridOverlayManager.spawnGridOverlay(world, state, collisionDetector, playerRef.getUuid());
-
+            GridOverlayManager.spawnPlayerGridOverlay(world, state, collisionDetector, playerRef.getUuid());
             String movesText = formatMoves(state.remainingMoves) + "/" + formatMoves(state.maxMoves);
-
-            // SUCCESS: Grid enabled
-            Message primary = Message.raw("Grid overlay enabled!").color("#90EE90");
-            Message secondary = Message.raw("Moves: " + movesText).color("#00BFFF");
-            ItemWithAllMetadata icon = new ItemStack("Ingredient_Crystal_Green", 1).toPacket();
-
-            NotificationUtil.sendNotification(
-                    playerRef.getPacketHandler(),
-                    primary,
-                    secondary,
-                    icon,
-                    NotificationStyle.Default
-            );
+            notify(playerRef, "Grid overlay enabled!", "Moves: " + movesText, "#90EE90", "Ingredient_Crystal_Green");
         });
-
-        System.out.println("[Griddify] [GRIDON] " + playerRef.getUsername() + " enabled grid overlay");
+        System.out.println("[Griddify] [GRIDON] " + playerRef.getUsername() + " enabled player grid overlay");
     }
 
-    private String formatMoves(double moves) {
-        if (moves == Math.floor(moves)) {
-            return String.valueOf((int) moves);
-        }
-        return String.format("%.1f", moves);
+    private void notify(PlayerRef p, String primary, String secondary, String color, String item) {
+        Message pMsg = Message.raw(primary).color(color);
+        Message sMsg = secondary != null ? Message.raw(secondary).color("#FFFFFF") : null;
+        ItemWithAllMetadata icon = new ItemStack(item, 1).toPacket();
+        NotificationUtil.sendNotification(p.getPacketHandler(), pMsg, sMsg, icon, NotificationStyle.Default);
+    }
+
+    private String formatMoves(double m) {
+        return m == Math.floor(m) ? String.valueOf((int) m) : String.format("%.1f", m);
     }
 }

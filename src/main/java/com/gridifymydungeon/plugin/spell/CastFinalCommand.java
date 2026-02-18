@@ -72,14 +72,14 @@ public class CastFinalCommand extends AbstractPlayerCommand {
         );
 
         if (distanceFromCaster > spell.getRangeGrids() && spell.getRangeGrids() > 0) {
-            playerRef.sendMessage(Message.raw("[Griddify] Out of range! You aimed " + distanceFromCaster +
-                    " grids away but range is " + spell.getRangeGrids() + " grids").color("#FF0000"));
-            playerRef.sendMessage(Message.raw("[Griddify] Walk closer to a monster and try again!").color("#FFA500"));
+            playerRef.sendMessage(Message.raw("[Griddify] Out of range! Aimed " + distanceFromCaster +
+                    " grids, max is " + spell.getRangeGrids() + ". Walk body closer to the target.").color("#FF0000"));
             return;
         }
 
-        // Commit: unfreeze NPC, consume slot, calculate affected area.
+        // Commit: unfreeze NPC, consume slot, mark action used, calculate affected area.
         state.unfreeze();
+        state.hasUsedAction = true; // Consume action for this turn
 
         int cost = spell.getSlotCost();
         if (!state.stats.consumeSpellSlot(cost)) {
@@ -92,34 +92,42 @@ public class CastFinalCommand extends AbstractPlayerCommand {
         SpellPattern pattern = spell.getPattern();
 
         // Calculate affected cells based on pattern type:
-        //   NPC-origin patterns (SELF, AURA, CONE, LINE): always fire from the frozen NPC cell.
+        //   NPC-origin patterns (SELF, AURA, CONE, LINE, WALL): always fire from the frozen NPC cell.
         //   Targeted patterns (SINGLE_TARGET, SPHERE, CUBE, etc.): fire centred on the aimed cell.
         Set<SpellPatternCalculator.GridCell> affectedCells;
         switch (pattern) {
             case SELF:
             case AURA:
-                // Centred on the caster NPC, aiming irrelevant
-                affectedCells = SpellPatternCalculator.calculatePattern(
-                        pattern, castState.getDirection(),
-                        castState.getCasterGridX(), castState.getCasterGridZ(),
-                        spell.getRangeGrids(), spell.getAreaGrids());
-                break;
             case CONE:
             case LINE:
-                // Direction-locked from NPC, aiming irrelevant
+            case WALL:
+                // All NPC-origin patterns: direction already updated live as player walked around NPC
                 affectedCells = SpellPatternCalculator.calculatePattern(
                         pattern, castState.getDirection(),
                         castState.getCasterGridX(), castState.getCasterGridZ(),
                         spell.getRangeGrids(), spell.getAreaGrids());
                 break;
             default:
-                // SINGLE_TARGET, SPHERE, CUBE, CYLINDER, CHAIN, WALL — centred on aimed cell
+                // SINGLE_TARGET, SPHERE, CUBE, CYLINDER, CHAIN — centred on aimed cell
                 affectedCells = SpellPatternCalculator.calculatePattern(
                         pattern, castState.getDirection(),
                         aimGridX, aimGridZ,
                         spell.getRangeGrids(), spell.getAreaGrids());
                 break;
         }
+
+        // Debug: log affected cells and monster positions so direction issues are visible
+        StringBuilder dbg = new StringBuilder("[Griddify] [CASTFINAL] " + spell.getName()
+                + " dir=" + castState.getDirection().name()
+                + " caster=(" + castState.getCasterGridX() + "," + castState.getCasterGridZ() + ")"
+                + " cells=[");
+        for (SpellPatternCalculator.GridCell c : affectedCells) dbg.append("(").append(c.x).append(",").append(c.z).append(")");
+        dbg.append("] monsters=[");
+        for (com.gridifymydungeon.plugin.dnd.MonsterState m : encounterManager.getMonsters()) {
+            if (m.isAlive()) dbg.append(m.getDisplayName()).append("@(").append(m.currentGridX).append(",").append(m.currentGridZ).append(")");
+        }
+        dbg.append("]");
+        System.out.println(dbg);
 
         // --- Calculate damage ---
         int totalDamage = 0;

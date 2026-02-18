@@ -11,27 +11,27 @@
         "stretch": {"x": 1, "y": 1.25, "z": 1},
         "settings": {
           "isPiece": false,
-          "size": {"x": 64, "y": 8, "z": 64},
+          "size": {"x": 128, "y": 8, "z": 128},
           "isStaticBox": true
         },
         "textureLayout": {
           "back": {
-            "offset": {"x": 0, "y": 248},
+            "offset": {"x": 128, "y": 248},
             "mirror": {"x": false, "y": false},
             "angle": 0
           },
           "right": {
-            "offset": {"x": 8, "y": 192},
+            "offset": {"x": 256, "y": 128},
             "mirror": {"x": true, "y": true},
             "angle": 270
           },
           "front": {
-            "offset": {"x": 0, "y": 248},
+            "offset": {"x": 128, "y": 248},
             "mirror": {"x": false, "y": false},
             "angle": 0
           },
           "left": {
-            "offset": {"x": 8, "y": 192},
+            "offset": {"x": 256, "y": 128},
             "mirror": {"x": true, "y": true},
             "angle": 270
           },
@@ -41,7 +41,7 @@
             "angle": 0
           },
           "bottom": {
-            "offset": {"x": 0, "y": 192},
+            "offset": {"x": 128, "y": 128},
             "mirror": {"x": false, "y": false},
             "angle": 0
           }

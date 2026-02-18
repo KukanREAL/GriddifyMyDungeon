@@ -1,12 +1,14 @@
 package com.gridifymydungeon.plugin.gridmove;
 
-import com.gridifymydungeon.plugin.dnd.commands.MonsterEntityController;
 import com.hypixel.hytale.component.Holder;
 import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.component.RemoveReason;
 import com.hypixel.hytale.component.Store;
+import com.hypixel.hytale.math.util.ChunkUtil;
 import com.hypixel.hytale.math.vector.Vector3d;
 import com.hypixel.hytale.math.vector.Vector3f;
+import com.hypixel.hytale.math.vector.Vector3i;
+import com.hypixel.hytale.protocol.BlockMaterial;
 import com.hypixel.hytale.server.core.asset.type.blocktype.config.BlockType;
 import com.hypixel.hytale.server.core.asset.type.model.config.Model;
 import com.hypixel.hytale.server.core.asset.type.model.config.ModelAsset;
@@ -16,6 +18,10 @@ import com.hypixel.hytale.server.core.modules.entity.component.ModelComponent;
 import com.hypixel.hytale.server.core.modules.entity.component.TransformComponent;
 import com.hypixel.hytale.server.core.modules.entity.tracker.NetworkId;
 import com.hypixel.hytale.server.core.universe.world.World;
+import com.hypixel.hytale.server.core.universe.world.chunk.ChunkColumn;
+import com.hypixel.hytale.server.core.universe.world.chunk.section.ChunkSection;
+import com.hypixel.hytale.server.core.universe.world.chunk.section.FluidSection;
+import com.hypixel.hytale.server.core.universe.world.storage.ChunkStore;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 
 import java.util.ArrayList;
@@ -26,89 +32,99 @@ import java.util.Map;
 import java.util.Queue;
 import java.util.UUID;
 
+/**
+ * GridOverlayManager — spawns movement-range grid overlays.
+ *
+ * One entity per 2x2 grid cell, centred at the cell's world-space midpoint.
+ * Models (full 2x2 tile textures, no rotation needed):
+ *   Grid_Basic   — grey, used for monster/GM range
+ *   Grid_Player  — blue, used for player movement range
+ *
+ * GM /gridon with no monster → flat 100x100 area map around GM position.
+ * Barrier blocks (id contains "barrier") and fluid cells are always skipped.
+ */
 public class GridOverlayManager {
 
-    private static final String MODEL_ASSET_ID = "Grid_Corner_Flat";
+    private static final String MODEL_PLAYER  = "Grid_Player"; // blue
+    private static final String MODEL_DEFAULT = "Grid_Basic";  // grey
     private static final String FALLBACK_MODEL = "Debug";
 
-    private static Model cachedModel = null;
-    private static boolean modelLoadAttempted = false;
+    private static Model cachedPlayerModel  = null;
+    private static Model cachedDefaultModel = null;
+    private static boolean modelsAttempted  = false;
 
     private static final int MAX_OVERLAY_CELLS = 150;
+    private static final int GM_MAP_RADIUS     = 50;   // 100x100
 
-    private static final float MAX_HEIGHT_UP = 3.0f;
+    private static final float MAX_HEIGHT_UP   = 3.0f;
     private static final float MAX_HEIGHT_DOWN = 4.0f;
 
-    private static final float[][] OFFSETS = {
-            {-0.5f, -0.5f},  // NW
-            {+0.5f, -0.5f},  // NE
-            {-0.5f, +0.5f},  // SW
-            {+0.5f, +0.5f},  // SE
-    };
-
-    private static final float[] ROTATIONS = {
-            (float) Math.PI,                // NW: 180°
-            (float) (Math.PI / 2.0),        // NE: 90°
-            (float) (-Math.PI / 2.0),       // SW: 270°
-            0f,                             // SE: 0°
-    };
-
     private static final int[][] NEIGHBORS = {
-            { 0, -1},  { 1,  0},  { 0,  1},  {-1,  0},   // cardinal
-            { 1, -1},  { 1,  1},  {-1,  1},  {-1, -1},   // diagonal
+            { 0, -1}, { 1, 0}, { 0, 1}, {-1, 0},      // cardinal
+            { 1, -1}, { 1, 1}, {-1, 1}, {-1, -1},      // diagonal
     };
 
+    // ========================================================
+    // PUBLIC API
+    // ========================================================
+
+    /** Player /gridon — blue tiles, BFS movement range. */
+    public static boolean spawnPlayerGridOverlay(World world, GridPlayerState state,
+                                                 CollisionDetector collisionDetector, UUID excludePlayer) {
+        ensureModels();
+        Model model = cachedPlayerModel != null ? cachedPlayerModel : cachedDefaultModel;
+        if (model == null) return false;
+        List<ReachableCell> cells = floodFillReachable(world, state, collisionDetector, excludePlayer);
+        spawnCells(world, state, cells, model);
+        state.gridOverlayEnabled = true;
+        System.out.println("[GridMove] [GRID] Player overlay: " + cells.size() + " cells");
+        return true;
+    }
+
+    /** Monster /gridon (GM controlling) — grey tiles, BFS movement range. */
     public static boolean spawnGridOverlay(World world, GridPlayerState state,
                                            CollisionDetector collisionDetector, UUID excludePlayer) {
-        try {
-            Model model = getGridModel();
-            if (model == null) {
-                return false;
+        ensureModels();
+        Model model = cachedDefaultModel;
+        if (model == null) return false;
+        List<ReachableCell> cells = floodFillReachable(world, state, collisionDetector, excludePlayer);
+        spawnCells(world, state, cells, model);
+        state.gridOverlayEnabled = true;
+        System.out.println("[GridMove] [GRID] Monster overlay: " + cells.size() + " cells");
+        return true;
+    }
+
+    /** GM /gridon with no monster — flat 100x100 area map, skipping barriers and fluid. */
+    public static boolean spawnGMMapOverlay(World world, GridPlayerState gmState) {
+        ensureModels();
+        Model model = cachedDefaultModel;
+        if (model == null) return false;
+
+        int centerX = gmState.currentGridX;
+        int centerZ = gmState.currentGridZ;
+        float refY  = gmState.npcY;
+
+        List<ReachableCell> cells = new ArrayList<>();
+        for (int dx = -GM_MAP_RADIUS; dx <= GM_MAP_RADIUS; dx++) {
+            for (int dz = -GM_MAP_RADIUS; dz <= GM_MAP_RADIUS; dz++) {
+                int gx = centerX + dx;
+                int gz = centerZ + dz;
+                if (isBarrierCell(world, gx, gz, refY)) continue;
+                Float groundY = scanForGround(world, gx, gz, refY + 8.0f);
+                if (groundY == null) continue;
+                if (hasFluidAbove(world, gx, gz, groundY)) continue;
+                cells.add(new ReachableCell(gx, gz, groundY));
             }
-
-            List<ReachableCell> reachableCells = floodFillReachable(
-                    world, state, collisionDetector, excludePlayer);
-
-            if (reachableCells.isEmpty()) {
-                System.out.println("[GridMove] [GRID] No reachable cells found");
-                state.gridOverlayEnabled = true;
-                return true;
-            }
-
-            Store<EntityStore> store = world.getEntityStore().getStore();
-
-            for (ReachableCell cell : reachableCells) {
-                float centerX = (cell.gridX * 2.0f) + 1.0f;
-                float centerZ = (cell.gridZ * 2.0f) + 1.0f;
-                float y = cell.groundY + 0.01f;
-
-                for (int i = 0; i < 4; i++) {
-                    float entityX = centerX + OFFSETS[i][0];
-                    float entityZ = centerZ + OFFSETS[i][1];
-
-                    Ref<EntityStore> ref = spawnQuarter(store, model,
-                            entityX, y, entityZ, ROTATIONS[i]);
-                    state.gridOverlay.add(ref);
-                }
-            }
-
-            state.gridOverlayEnabled = true;
-            System.out.println("[GridMove] [GRID] Spawned overlay: " + reachableCells.size() +
-                    " cells (" + state.gridOverlay.size() + " entities)");
-            return true;
-
-        } catch (Exception e) {
-            System.err.println("[GridMove] [GRID] Failed to spawn overlay: " + e.getMessage());
-            e.printStackTrace();
-            return false;
         }
+        spawnCells(world, gmState, cells, model);
+        gmState.gridOverlayEnabled = true;
+        System.out.println("[GridMove] [GRID] GM map overlay: " + cells.size() + " cells");
+        return true;
     }
 
     public static void refreshGridOverlay(World world, GridPlayerState state,
                                           CollisionDetector collisionDetector, UUID excludePlayer) {
-        if (!state.gridOverlayEnabled) {
-            return;
-        }
+        if (!state.gridOverlayEnabled) return;
         removeGridOverlayEntities(world, state);
         spawnGridOverlay(world, state, collisionDetector, excludePlayer);
     }
@@ -119,21 +135,36 @@ public class GridOverlayManager {
         System.out.println("[GridMove] [GRID] Removed overlay");
     }
 
+    // ========================================================
+    // CELL SPAWNING — 1 entity per cell, centred in the 2x2 block
+    // ========================================================
+
+    private static void spawnCells(World world, GridPlayerState state,
+                                   List<ReachableCell> cells, Model model) {
+        Store<EntityStore> store = world.getEntityStore().getStore();
+        for (ReachableCell cell : cells) {
+            // Centre of the 2x2 block: gridX*2 + 1, gridZ*2 + 1
+            float cx = (cell.gridX * 2.0f) + 1.0f;
+            float cz = (cell.gridZ * 2.0f) + 1.0f;
+            float y  = cell.groundY + 0.01f;
+            Ref<EntityStore> ref = spawnTile(store, model, cx, y, cz);
+            state.gridOverlay.add(ref);
+        }
+    }
+
     private static void removeGridOverlayEntities(World world, GridPlayerState state) {
         Store<EntityStore> store = world.getEntityStore().getStore();
-
         for (Ref<EntityStore> ref : state.gridOverlay) {
             if (ref != null && ref.isValid()) {
-                try {
-                    store.removeEntity(ref, RemoveReason.REMOVE);
-                } catch (Exception e) {
-
-                }
+                try { store.removeEntity(ref, RemoveReason.REMOVE); } catch (Exception ignored) {}
             }
         }
-
         state.gridOverlay.clear();
     }
+
+    // ========================================================
+    // BFS FLOOD-FILL
+    // ========================================================
 
     private static List<ReachableCell> floodFillReachable(World world, GridPlayerState state,
                                                           CollisionDetector collisionDetector,
@@ -143,155 +174,202 @@ public class GridOverlayManager {
         Map<Long, Double> bestMoves = new HashMap<>();
         Map<Long, Float> groundYCache = new HashMap<>();
 
-        float startGroundY = state.npcY;
+        float startY  = state.npcY;
         long startKey = packKey(state.currentGridX, state.currentGridZ);
 
-        queue.add(new BfsNode(state.currentGridX, state.currentGridZ,
-                state.remainingMoves, startGroundY));
+        queue.add(new BfsNode(state.currentGridX, state.currentGridZ, state.remainingMoves, startY));
         bestMoves.put(startKey, state.remainingMoves);
-        groundYCache.put(startKey, startGroundY);
+        groundYCache.put(startKey, startY);
 
         while (!queue.isEmpty() && result.size() < MAX_OVERLAY_CELLS) {
-            BfsNode current = queue.poll();
-
-            for (int[] neighbor : NEIGHBORS) {
-                int nx = current.gridX + neighbor[0];
-                int nz = current.gridZ + neighbor[1];
-                boolean diagonal = (neighbor[0] != 0 && neighbor[1] != 0);
+            BfsNode cur = queue.poll();
+            for (int[] nb : NEIGHBORS) {
+                int nx = cur.gridX + nb[0];
+                int nz = cur.gridZ + nb[1];
+                boolean diagonal = (nb[0] != 0 && nb[1] != 0);
                 double cost = diagonal ? 1.5 : 1.0;
-
-                double movesAfter = current.movesLeft - cost;
-                if (movesAfter < 0) {
-                    continue;
-                }
+                double movesAfter = cur.movesLeft - cost;
+                if (movesAfter < 0) continue;
 
                 long nKey = packKey(nx, nz);
-
-                Double previousBest = bestMoves.get(nKey);
-                if (previousBest != null && previousBest >= movesAfter) {
-                    continue;
-                }
+                Double prev = bestMoves.get(nKey);
+                if (prev != null && prev >= movesAfter) continue;
 
                 if (collisionDetector != null &&
-                        collisionDetector.isPositionOccupied(nx, nz, -1, excludePlayer)) {
-                    continue;
+                        collisionDetector.isPositionOccupied(nx, nz, -1, excludePlayer)) continue;
+
+                if (isBarrierCell(world, nx, nz, cur.groundY)) continue;
+
+                Float groundY = groundYCache.get(nKey);
+                if (groundY == null) {
+                    groundY = scanForGround(world, nx, nz, cur.groundY + 6.0f);
+                    if (groundY == null) groundY = scanForGround(world, nx, nz, state.npcY + 6.0f);
+                    if (groundY == null) continue;
+                    groundYCache.put(nKey, groundY);
                 }
 
-                Float neighborGroundY = groundYCache.get(nKey);
-                if (neighborGroundY == null) {
-
-                    neighborGroundY = MonsterEntityController.scanForGroundPublic(
-                            world, nx, nz, current.groundY + 6.0f);
-
-                    if (neighborGroundY == null) {
-
-                        neighborGroundY = MonsterEntityController.scanForGroundPublic(
-                                world, nx, nz, state.npcY + 6.0f);
-                    }
-
-                    if (neighborGroundY == null) {
-                        continue;
-                    }
-                    groundYCache.put(nKey, neighborGroundY);
-                }
-
-                float heightDiff = neighborGroundY - current.groundY;
-
-                if (heightDiff >= MAX_HEIGHT_UP || heightDiff < -MAX_HEIGHT_DOWN) {
-                    continue;
-                }
+                float heightDiff = groundY - cur.groundY;
+                if (heightDiff >= MAX_HEIGHT_UP || heightDiff < -MAX_HEIGHT_DOWN) continue;
 
                 bestMoves.put(nKey, movesAfter);
-
                 if (nx != state.currentGridX || nz != state.currentGridZ) {
-                    if (previousBest == null) {
-                        result.add(new ReachableCell(nx, nz, neighborGroundY));
-                    }
+                    if (prev == null) result.add(new ReachableCell(nx, nz, groundY));
                 }
-
-                queue.add(new BfsNode(nx, nz, movesAfter, neighborGroundY));
+                queue.add(new BfsNode(nx, nz, movesAfter, groundY));
             }
         }
-
         return result;
     }
 
-    private static Model getGridModel() {
-        if (cachedModel != null) {
-            return cachedModel;
-        }
+    // ========================================================
+    // BARRIER DETECTION
+    // ========================================================
 
-        if (modelLoadAttempted) {
-            return null;
-        }
-
-        modelLoadAttempted = true;
-
+    private static boolean isBarrierCell(World world, int gridX, int gridZ, float refY) {
         try {
-            System.out.println("[GridMove] [GRID] === MODEL LOADING ===");
-
-            System.out.println("[GridMove] [GRID] Available Model assets in registry:");
-            try {
-                Map<String, ModelAsset> allModels = ModelAsset.getAssetMap().getAssetMap();
-                System.out.println("[GridMove] [GRID] Total models: " + allModels.size());
-
-                int count = 0;
-                for (String key : allModels.keySet()) {
-                    System.out.println("[GridMove] [GRID]   - " + key);
-                    count++;
-                    if (count >= 20) {
-                        System.out.println("[GridMove] [GRID]   ... and " + (allModels.size() - 20) + " more");
-                        break;
+            int scanFrom = (int) Math.floor(refY) + 2;
+            int scanTo   = (int) Math.floor(refY) - 4;
+            for (int y = scanFrom; y >= scanTo; y--) {
+                for (int xOff = 0; xOff < 2; xOff++) {
+                    for (int zOff = 0; zOff < 2; zOff++) {
+                        BlockType block = world.getBlockType(
+                                new Vector3i((gridX * 2) + xOff, y, (gridZ * 2) + zOff));
+                        if (isBarrier(block)) return true;
                     }
                 }
-            } catch (Exception e) {
-                System.out.println("[GridMove] [GRID] Could not list models: " + e.getMessage());
             }
+        } catch (Exception ignored) {}
+        return false;
+    }
 
-            System.out.println("[GridMove] [GRID] Attempting to load Model asset: " + MODEL_ASSET_ID);
+    // ========================================================
+    // GROUND SCANNING
+    // ========================================================
 
-            ModelAsset modelAsset = ModelAsset.getAssetMap().getAsset(MODEL_ASSET_ID);
-            if (modelAsset != null) {
-                cachedModel = Model.createScaledModel(modelAsset, 1.0f);
-                System.out.println("[GridMove] [GRID] SUCCESS! Loaded Grid_Corner_Flat model");
-                return cachedModel;
+    private static Float scanForGround(World world, int gridX, int gridZ, float referenceY) {
+        int startY = (int) Math.floor(referenceY);
+        int endY   = startY - 12;
+        for (int blockY = startY; blockY >= endY; blockY--) {
+            boolean hasGround = false;
+            float maxHeight = 0;
+            for (int xOff = 0; xOff < 2; xOff++) {
+                for (int zOff = 0; zOff < 2; zOff++) {
+                    BlockType block = world.getBlockType(
+                            new Vector3i((gridX * 2) + xOff, blockY, (gridZ * 2) + zOff));
+                    if (isSolid(block) && !isBarrier(block)) {
+                        maxHeight = Math.max(maxHeight, 1.0f);
+                        hasGround = true;
+                    } else if (isBarrier(block)) {
+                        hasGround = false;
+                    }
+                }
             }
-
-            System.out.println("[GridMove] [GRID] Model asset '" + MODEL_ASSET_ID + "' not found in registry");
-        } catch (Exception e) {
-            System.err.println("[GridMove] [GRID] Error: " + e.getMessage());
-            e.printStackTrace();
+            if (hasGround) {
+                float groundY = blockY + maxHeight;
+                if (!hasFluidAbove(world, gridX, gridZ, groundY)) return groundY;
+            }
         }
-
-        try {
-            ModelAsset fallback = ModelAsset.getAssetMap().getAsset(FALLBACK_MODEL);
-            if (fallback != null) {
-                cachedModel = Model.createScaledModel(fallback, 1.0f);
-                System.out.println("[GridMove] [GRID] Using Debug fallback (RGB cube)");
-                return cachedModel;
-            }
-        } catch (Exception e) {
-            System.err.println("[GridMove] [GRID] Debug fallback failed: " + e.getMessage());
-        }
-
-        System.err.println("[GridMove] [GRID] All loading failed");
         return null;
     }
 
-    private static Ref<EntityStore> spawnQuarter(Store<EntityStore> store, Model model,
-                                                 float x, float y, float z, float yawRad) {
+    // ========================================================
+    // FLUID DETECTION
+    // ========================================================
+
+    private static boolean hasFluidAbove(World world, int gridX, int gridZ, float groundY) {
+        try {
+            Store<ChunkStore> cs = world.getChunkStore().getStore();
+            int startY = (int) Math.floor(groundY);
+            int endY   = (int) Math.floor(groundY + 2.0f);
+            for (int y = startY; y <= endY; y++) {
+                for (int xOff = 0; xOff < 2; xOff++) {
+                    for (int zOff = 0; zOff < 2; zOff++) {
+                        int bx = (gridX * 2) + xOff, bz = (gridZ * 2) + zOff;
+                        FluidSection fluid = findFluidSection(world, cs, bx, y, bz);
+                        if (fluid != null && fluid.getFluidId(bx, y, bz) != 0) return true;
+                    }
+                }
+            }
+        } catch (Exception ignored) {}
+        return false;
+    }
+
+    private static FluidSection findFluidSection(World world, Store<ChunkStore> store,
+                                                 int bx, int by, int bz) {
+        try {
+            long idx = ChunkUtil.indexChunkFromBlock(bx, bz);
+            Ref<ChunkStore> cRef = world.getChunkStore().getChunkReference(idx);
+            if (cRef == null || !cRef.isValid()) return null;
+            ChunkColumn col = store.getComponent(cRef, ChunkColumn.getComponentType());
+            if (col == null) return null;
+            int targetSY = ChunkUtil.chunkCoordinate(by);
+            for (Ref<ChunkStore> sRef : col.getSections()) {
+                if (sRef == null || !sRef.isValid()) continue;
+                ChunkSection sec = store.getComponent(sRef, ChunkSection.getComponentType());
+                if (sec != null && sec.getY() == targetSY)
+                    return store.getComponent(sRef, FluidSection.getComponentType());
+            }
+        } catch (Exception ignored) {}
+        return null;
+    }
+
+    // ========================================================
+    // BLOCK HELPERS
+    // ========================================================
+
+    private static boolean isSolid(BlockType block) {
+        return block != null && block.getMaterial() == BlockMaterial.Solid;
+    }
+
+    private static boolean isBarrier(BlockType block) {
+        return block != null && block.getId() != null &&
+                block.getId().toLowerCase().contains("barrier");
+    }
+
+    // ========================================================
+    // MODEL LOADING
+    // ========================================================
+
+    private static void ensureModels() {
+        if (modelsAttempted) return;
+        modelsAttempted = true;
+        cachedPlayerModel  = loadModel(MODEL_PLAYER);
+        cachedDefaultModel = loadModel(MODEL_DEFAULT);
+        if (cachedPlayerModel  == null) cachedPlayerModel  = cachedDefaultModel;
+        if (cachedDefaultModel == null) {
+            cachedDefaultModel = loadModel(FALLBACK_MODEL);
+            cachedPlayerModel  = cachedDefaultModel;
+        }
+    }
+
+    private static Model loadModel(String id) {
+        try {
+            ModelAsset asset = ModelAsset.getAssetMap().getAsset(id);
+            if (asset != null) {
+                System.out.println("[GridMove] [GRID] Loaded model: " + id);
+                return Model.createScaledModel(asset, 1.0f);
+            }
+            System.out.println("[GridMove] [GRID] Model not found: " + id);
+        } catch (Exception e) {
+            System.err.println("[GridMove] [GRID] Error loading " + id + ": " + e.getMessage());
+        }
+        return null;
+    }
+
+    // ========================================================
+    // ENTITY SPAWNING — single tile per cell, no rotation
+    // ========================================================
+
+    private static Ref<EntityStore> spawnTile(Store<EntityStore> store, Model model,
+                                              float x, float y, float z) {
         Holder<EntityStore> holder = EntityStore.REGISTRY.newHolder();
-
-        Vector3d position = new Vector3d(x, y, z);
-        Vector3f rotation = new Vector3f(0, yawRad, 0);
-
-        holder.addComponent(TransformComponent.getComponentType(), new TransformComponent(position, rotation));
+        holder.addComponent(TransformComponent.getComponentType(),
+                new TransformComponent(new Vector3d(x, y, z), new Vector3f(0, 0, 0)));
         holder.addComponent(ModelComponent.getComponentType(), new ModelComponent(model));
         holder.addComponent(BoundingBox.getComponentType(), new BoundingBox(model.getBoundingBox()));
         holder.addComponent(NetworkId.getComponentType(),
                 new NetworkId(store.getExternalData().takeNextNetworkId()));
         holder.ensureComponent(UUIDComponent.getComponentType());
-
         return store.addEntity(holder, com.hypixel.hytale.component.AddReason.SPAWN);
     }
 
@@ -299,27 +377,17 @@ public class GridOverlayManager {
         return ((long) gridX << 32) | (gridZ & 0xFFFFFFFFL);
     }
 
-    private static class BfsNode {
-        final int gridX, gridZ;
-        final double movesLeft;
-        final float groundY;
+    // ========================================================
+    // INNER CLASSES
+    // ========================================================
 
-        BfsNode(int gridX, int gridZ, double movesLeft, float groundY) {
-            this.gridX = gridX;
-            this.gridZ = gridZ;
-            this.movesLeft = movesLeft;
-            this.groundY = groundY;
-        }
+    private static class BfsNode {
+        final int gridX, gridZ; final double movesLeft; final float groundY;
+        BfsNode(int x, int z, double m, float y) { gridX=x; gridZ=z; movesLeft=m; groundY=y; }
     }
 
     private static class ReachableCell {
-        final int gridX, gridZ;
-        final float groundY;
-
-        ReachableCell(int gridX, int gridZ, float groundY) {
-            this.gridX = gridX;
-            this.gridZ = gridZ;
-            this.groundY = groundY;
-        }
+        final int gridX, gridZ; final float groundY;
+        ReachableCell(int x, int z, float y) { gridX=x; gridZ=z; groundY=y; }
     }
 }

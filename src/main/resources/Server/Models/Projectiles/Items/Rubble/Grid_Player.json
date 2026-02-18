@@ -1,5 +1,5 @@
 {
-  "Model": "Items/Grid_Basic.blockymodel",
+  "Model": "Items/Grid_Player.blockymodel",
   "Texture": "Items/Grid.png",
   "HitBox": {
     "Max": {

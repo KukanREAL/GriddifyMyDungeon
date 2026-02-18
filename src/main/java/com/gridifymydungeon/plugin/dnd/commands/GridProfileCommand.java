@@ -56,6 +56,15 @@ public class GridProfileCommand extends AbstractPlayerCommand {
         playerRef.sendMessage(Message.raw(""));
         playerRef.sendMessage(Message.raw("Character Code: " + code).color("#FFD700"));
         playerRef.sendMessage(Message.raw(""));
+        playerRef.sendMessage(Message.raw("Class & Level:").color("#00BFFF"));
+        String className = state.stats.getClassType() != null ? state.stats.getClassType().getDisplayName() : "None";
+        String subclassName = state.stats.getSubclassType() != null ? " / " + state.stats.getSubclassType().getDisplayName() : "";
+        playerRef.sendMessage(Message.raw("  Class: " + className + subclassName).color("#FFD700"));
+        playerRef.sendMessage(Message.raw("  Level: " + state.stats.getLevel()).color("#00FF00"));
+        if (state.stats.getClassType() != null && state.stats.getClassType().isSpellcaster()) {
+            playerRef.sendMessage(Message.raw("  Spell Slots: " + state.stats.getRemainingSpellSlots() + "/" + state.stats.getSpellSlots()).color("#87CEEB"));
+        }
+        playerRef.sendMessage(Message.raw(""));
         playerRef.sendMessage(Message.raw("Ability Scores:").color("#00BFFF"));
         playerRef.sendMessage(Message.raw("  STR: " + state.stats.strength +
                 " DEX: " + state.stats.dexterity +
