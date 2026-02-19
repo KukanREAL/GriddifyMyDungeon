@@ -97,51 +97,54 @@ public class SpellPatternCalculator {
     }
 
     /**
-     * D&D cone — stair-step pattern where the tip is closest to the caster.
+     * D&D 5e cone — correct for all 8 directions, matching expected cell counts.
      *
-     * The cone grows 1 cell wider per row away from the caster:
-     *   row 1 (adjacent):  1 cell wide
-     *   row 2:             2 cells wide
-     *   row 3:             3 cells wide
-     *   ...and so on up to 'length' rows.
+     * Cardinal (N/S/E/W): at forward distance d, half-width = floor(d/2).
+     *   d=1: 1 cell, d=2: 3 cells, d=3: 3 cells → total 7 for length=3.
      *
-     * The far corner of the cone is diagonal from the player, per D&D 5e rules.
-     * Width at row d = d cells (centered on the forward axis, offset to one side for even rows).
-     *
-     * For cardinal directions the spread is perpendicular (left/right).
-     * For diagonal directions the spread is along the perpendicular cardinal axis.
+     * Diagonal (NE/NW/SE/SW): cells in the forward quadrant bounded by
+     *   cx + cz <= length + 1  (where cx,cz are the per-axis component steps).
+     *   This gives 6 cells for length=3 (a right-triangle in the quadrant).
      */
     private static Set<GridCell> calculateCone(Direction8 direction, int originX, int originZ, int length) {
         Set<GridCell> cells = new HashSet<>();
 
         int fdx = direction.getDeltaX();
         int fdz = direction.getDeltaZ();
-
-        // Perpendicular spread axis: rotate 90°, snap diagonals to cardinal
-        int perpDx, perpDz;
         boolean isDiagonal = (fdx != 0 && fdz != 0);
-        if (isDiagonal) {
-            // For diagonal directions spread East-West (perpendicular-ish to the diagonal)
-            perpDx = 1;
-            perpDz = 0;
-        } else {
-            // For cardinal directions rotate 90° CCW
-            perpDx = -fdz;
-            perpDz =  fdx;
-        }
 
-        for (int dist = 1; dist <= length; dist++) {
-            // Width at this row = dist (1, 2, 3, ...)
-            int width = dist;
-            // Center of this row
-            int cx = originX + fdx * dist;
-            int cz = originZ + fdz * dist;
-
-            // Spread from -(width-1) to 0 or 0 to (width-1)?
-            // Per spec: the corner is diagonally from the player, meaning the cone
-            // is offset to one side. We offset left: from -(width-1) to 0.
-            for (int side = -(width - 1); side <= 0; side++) {
-                cells.add(new GridCell(cx + perpDx * side, cz + perpDz * side));
+        for (int rx = -length; rx <= length; rx++) {
+            for (int rz = -length; rz <= length; rz++) {
+                if (isDiagonal) {
+                    // Must be strictly in the forward quadrant
+                    if (rx * fdx <= 0 || rz * fdz <= 0) continue;
+                    int cx = Math.abs(rx);
+                    int cz = Math.abs(rz);
+                    int fwdD = Math.max(cx, cz);
+                    if (fwdD < 1 || fwdD > length) continue;
+                    // D&D diagonal cone: bounded by the anti-diagonal cx+cz <= length+1
+                    if (cx + cz <= length + 1) {
+                        cells.add(new GridCell(originX + rx, originZ + rz));
+                    }
+                } else if (fdx == 0) {
+                    // Pure Z (NORTH or SOUTH)
+                    if (rz * fdz <= 0) continue;
+                    int fwdD = Math.abs(rz);
+                    int perpD = Math.abs(rx);
+                    if (fwdD < 1 || fwdD > length) continue;
+                    if (perpD <= fwdD / 2) {   // integer floor division
+                        cells.add(new GridCell(originX + rx, originZ + rz));
+                    }
+                } else {
+                    // Pure X (EAST or WEST)
+                    if (rx * fdx <= 0) continue;
+                    int fwdD = Math.abs(rx);
+                    int perpD = Math.abs(rz);
+                    if (fwdD < 1 || fwdD > length) continue;
+                    if (perpD <= fwdD / 2) {
+                        cells.add(new GridCell(originX + rx, originZ + rz));
+                    }
+                }
             }
         }
 

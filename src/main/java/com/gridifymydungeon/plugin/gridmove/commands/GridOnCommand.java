@@ -57,11 +57,6 @@ public class GridOnCommand extends AbstractPlayerCommand {
         if (roleManager.isGM(playerRef)) {
             GridPlayerState gmState = gridMoveManager.getState(playerRef);
 
-            if (gmState.gridOverlayEnabled) {
-                notify(playerRef, "Grid overlay already active", null, "#FFA500", "Ingredient_Crystal_Yellow");
-                return;
-            }
-
             MonsterState monster = encounterManager.getControlledMonster();
 
             if (monster != null) {
@@ -107,11 +102,6 @@ public class GridOnCommand extends AbstractPlayerCommand {
         if (state.npcEntity == null || !state.npcEntity.isValid()) {
             notify(playerRef, "Activate /gridmove first!", "You need to spawn your character",
                     "#FF0000", "Ingredient_Crystal_Red");
-            return;
-        }
-
-        if (state.gridOverlayEnabled) {
-            notify(playerRef, "Grid overlay already active", null, "#FFA500", "Ingredient_Crystal_Yellow");
             return;
         }
 

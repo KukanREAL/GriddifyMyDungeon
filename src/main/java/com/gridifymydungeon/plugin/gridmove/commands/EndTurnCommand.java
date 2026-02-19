@@ -2,7 +2,9 @@ package com.gridifymydungeon.plugin.gridmove.commands;
 
 import com.gridifymydungeon.plugin.dnd.CombatManager;
 import com.gridifymydungeon.plugin.dnd.commands.CombatCommand;
+import com.gridifymydungeon.plugin.gridmove.CollisionDetector;
 import com.gridifymydungeon.plugin.gridmove.GridMoveManager;
+import com.gridifymydungeon.plugin.gridmove.GridOverlayManager;
 import com.gridifymydungeon.plugin.gridmove.GridPlayerState;
 import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.component.Store;
@@ -22,19 +24,27 @@ import java.util.List;
 
 /**
  * /endturn - End turn, reset moves, advance to next.
- * Sends a popup to the current player AND broadcasts the updated turn order to everyone.
+ *
+ * On turn change (combat active):
+ *   - Removes all /gridon BFS overlays from players whose turn just ended.
+ *     (Static /grid overlays are preserved — gmMapOverlayActive flag distinguishes them.)
+ *   - The new current-turn player's overlay is re-spawned automatically so they
+ *     immediately see their movement range.
  */
 public class EndTurnCommand extends AbstractPlayerCommand {
 
     private final GridMoveManager manager;
     private final CombatManager combatManager;
-    private final CombatCommand combatCommand; // used for broadcasting turn order
+    private final CombatCommand combatCommand;
+    private final CollisionDetector collisionDetector;
 
-    public EndTurnCommand(GridMoveManager manager, CombatManager combatManager, CombatCommand combatCommand) {
+    public EndTurnCommand(GridMoveManager manager, CombatManager combatManager,
+                          CombatCommand combatCommand, CollisionDetector collisionDetector) {
         super("endturn", "End your turn and reset moves");
         this.manager = manager;
         this.combatManager = combatManager;
         this.combatCommand = combatCommand;
+        this.collisionDetector = collisionDetector;
     }
 
     @Override
@@ -58,6 +68,37 @@ public class EndTurnCommand extends AbstractPlayerCommand {
             List<CombatManager.CombatParticipant> order = combatManager.getTurnOrder();
             int currentIndex = combatManager.getCurrentTurnIndex();
             combatCommand.broadcastTurnOrder(order, currentIndex, "TURN CHANGE");
+
+            // --- Overlay management ---
+            // Remove BFS overlays from ALL players (but not static /grid maps).
+            // Then re-spawn for the new current-turn player only.
+            world.execute(() -> {
+                for (GridPlayerState ps : manager.getAllStates()) {
+                    if (ps.gridOverlayEnabled && !ps.gmMapOverlayActive) {
+                        // BFS overlay — remove it (it belongs to the previous turn player)
+                        GridOverlayManager.removeGridOverlay(world, ps);
+                    }
+                }
+
+                // Spawn fresh overlay for the new turn's player (if they are a player, not a monster)
+                if (next != null && next.isPlayer) {
+                    // Find the matching GridPlayerState by UUID (it's stored in playerRef on each state)
+                    for (GridPlayerState ps : manager.getAllStates()) {
+                        if (ps.playerRef != null
+                                && next.playerUUID != null
+                                && ps.playerRef.getUuid().equals(next.playerUUID)
+                                && ps.npcEntity != null && ps.npcEntity.isValid()) {
+                            GridOverlayManager.spawnPlayerGridOverlay(world, ps, collisionDetector,
+                                    ps.playerRef.getUuid());
+                            ps.playerRef.sendMessage(
+                                    Message.raw("[Griddify] Your turn! Grid overlay active  —  "
+                                                    + formatMoves(ps.remainingMoves) + "/" + formatMoves(ps.maxMoves) + " moves")
+                                            .color("#00BFFF"));
+                            break;
+                        }
+                    }
+                }
+            });
 
             System.out.println("[Griddify] [COMBAT] Turn advanced to: " + nextName);
 

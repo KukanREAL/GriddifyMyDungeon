@@ -1,5 +1,6 @@
 package com.gridifymydungeon.plugin.dnd;
 
+import com.gridifymydungeon.plugin.spell.MonsterType;
 import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.math.vector.Vector3d;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
@@ -14,6 +15,7 @@ public class MonsterState {
     public final int monsterNumber;
     public final String monsterName;
     public CharacterStats stats;
+    public MonsterType monsterType = null;  // set from MonsterDatabase on spawn; gates attack access
 
     // Grid position
     public int currentGridX;

@@ -3,6 +3,7 @@ package com.gridifymydungeon.plugin.spell;
 import com.gridifymydungeon.plugin.dnd.EncounterManager;
 import com.gridifymydungeon.plugin.dnd.MonsterState;
 import com.gridifymydungeon.plugin.dnd.RoleManager;
+import com.gridifymydungeon.plugin.spell.MonsterType;
 import com.gridifymydungeon.plugin.gridmove.GridMoveManager;
 import com.gridifymydungeon.plugin.gridmove.GridPlayerState;
 import com.hypixel.hytale.component.Ref;
@@ -51,7 +52,7 @@ public class ListSpellsCommand extends AbstractPlayerCommand {
                 showMonsterActions(playerRef, controlled);
             } else {
                 playerRef.sendMessage(Message.raw("[Griddify] Control a monster first with /control <#>").color("#FFA500"));
-                playerRef.sendMessage(Message.raw("[Griddify] Basic monster attacks: Scratch, Hit, Bow_Shot").color("#CCCCCC"));
+                playerRef.sendMessage(Message.raw("[Griddify] Each monster has unique attacks shown here once controlled.").color("#CCCCCC"));
             }
             return;
         }
@@ -94,19 +95,29 @@ public class ListSpellsCommand extends AbstractPlayerCommand {
 
     private void showMonsterActions(PlayerRef playerRef, MonsterState monster) {
         ClassType mClass = monster.stats.getClassType();
+        MonsterType mType = monster.monsterType;
 
         header(playerRef, "MONSTER ACTIONS - " + monster.getDisplayName() +
                 (mClass != null ? "  [" + mClass.getDisplayName() + "]" : ""));
         playerRef.sendMessage(Message.raw(""));
 
-        // Always show basic monster attacks
-        playerRef.sendMessage(Message.raw("  BASIC ATTACKS (any monster):").color("#FF8C00"));
-        for (SpellData atk : SpellDatabase.getMonsterAttacks()) {
-            printSpell(playerRef, atk);
+        // Show this monster's specific attacks
+        List<SpellData> monsterAttacks = mType != null
+                ? SpellDatabase.getAttacksForMonsterType(mType)
+                : java.util.Collections.emptyList();
+
+        if (!monsterAttacks.isEmpty()) {
+            playerRef.sendMessage(Message.raw("  ATTACKS (" + monster.monsterName + "):").color("#FF8C00"));
+            for (SpellData atk : monsterAttacks) {
+                printSpell(playerRef, atk);
+            }
+        } else {
+            playerRef.sendMessage(Message.raw("  No specific attacks registered for this monster type.").color("#808080"));
+            playerRef.sendMessage(Message.raw("  Use /Cast Scratch, Hit, or Bow_Shot for generic attacks.").color("#808080"));
         }
         playerRef.sendMessage(Message.raw(""));
 
-        // If the monster has a class, show its spells too
+        // If the monster has a player-class, show those spells too
         if (mClass != null) {
             SubclassType mSub = monster.stats.getSubclassType();
             int mLevel = Math.max(1, monster.stats.getLevel());
@@ -120,10 +131,9 @@ public class ListSpellsCommand extends AbstractPlayerCommand {
             }
             if (count == 0) playerRef.sendMessage(Message.raw("    (none at level " + mLevel + ")").color("#808080"));
             playerRef.sendMessage(Message.raw(""));
-            footer(playerRef, SpellDatabase.getMonsterAttacks().size() + count);
+            footer(playerRef, monsterAttacks.size() + count);
         } else {
-            playerRef.sendMessage(Message.raw("  Tip: Use /GridClass <class> while controlling to unlock class spells!").color("#808080"));
-            footer(playerRef, SpellDatabase.getMonsterAttacks().size());
+            footer(playerRef, monsterAttacks.size());
         }
     }
 

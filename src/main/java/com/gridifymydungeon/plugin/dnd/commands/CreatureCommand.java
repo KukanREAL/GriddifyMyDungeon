@@ -1,7 +1,7 @@
 package com.gridifymydungeon.plugin.dnd.commands;
 
 import com.gridifymydungeon.plugin.dnd.EncounterManager;
-import com.gridifymydungeon.plugin.dnd.commands.MonsterEntityController;
+import com.gridifymydungeon.plugin.dnd.MonsterDatabase;
 import com.gridifymydungeon.plugin.dnd.MonsterState;
 import com.gridifymydungeon.plugin.dnd.RoleManager;
 import com.gridifymydungeon.plugin.gridmove.CollisionDetector;
@@ -160,6 +160,24 @@ public class CreatureCommand extends AbstractPlayerCommand {
         monster.currentGridX = gridX;
         monster.currentGridZ = gridZ;
         monster.lastGMPosition = gmPos;
+
+        // ── Apply D&D stats from database if available ──────────────────────
+        MonsterDatabase.MonsterStats dbStats = MonsterDatabase.getStats(monsterName);
+        if (dbStats != null) {
+            dbStats.applyTo(monster.stats);
+            monster.maxMoves       = dbStats.moves;
+            monster.remainingMoves = dbStats.moves;
+            monster.isFlying       = dbStats.flying;
+            monster.stats.isFlying = dbStats.flying;
+            monster.monsterType    = dbStats.monsterType;   // ← gates attack access
+            playerRef.sendMessage(Message.raw("[Griddify] Stats loaded: HP " + dbStats.maxHP
+                    + " (" + dbStats.hitDice + ")  AC " + dbStats.ac
+                    + "  CR " + MonsterDatabase.formatCR(dbStats.cr10x)
+                    + "  [" + dbStats.type + "]").color("#90EE90"));
+        } else {
+            playerRef.sendMessage(Message.raw("[Griddify] No D&D stats found for '" + monsterName
+                    + "' — using defaults. Use /HP and /AC to set manually.").color("#FFA500"));
+        }
 
         // Spawn monster entity in world
         final int finalGridX = gridX;

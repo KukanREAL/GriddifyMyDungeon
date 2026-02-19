@@ -133,7 +133,7 @@ public class GridMovePlugin extends JavaPlugin {
         // Player commands
         getCommandRegistry().registerCommand(new GridMoveCommand(gridMoveManager, collisionDetector, roleManager));
         getCommandRegistry().registerCommand(new MaxTurnsCommand(gridMoveManager));
-        getCommandRegistry().registerCommand(new EndTurnCommand(gridMoveManager, combatManager, combatCommand));
+        getCommandRegistry().registerCommand(new EndTurnCommand(gridMoveManager, combatManager, combatCommand, collisionDetector));
         getCommandRegistry().registerCommand(new GridCamCommand());
         getCommandRegistry().registerCommand(new ClearHologramsCommand(gridMoveManager));
         getCommandRegistry().registerCommand(new GridOnCommand(gridMoveManager, collisionDetector, encounterManager, roleManager));
@@ -182,6 +182,7 @@ public class GridMovePlugin extends JavaPlugin {
         // Class selection commands - FIXED: Removed extra arguments
         getCommandRegistry().registerCommand(new GridClassCommand(gridMoveManager, roleManager, encounterManager));
         getCommandRegistry().registerCommand(new GridSubclassCommand(gridMoveManager));
+        getCommandRegistry().registerCommand(new com.gridifymydungeon.plugin.dnd.commands.GridSubclassesCommand(gridMoveManager));
 
         // FIXED: SpellVisualManager now receives world at call time (not at init), avoiding null world on startup
         SpellVisualManager spellVisualManager = new SpellVisualManager(gridMoveManager);
@@ -191,7 +192,7 @@ public class GridMovePlugin extends JavaPlugin {
 
         // Spell casting commands - FIXED: Removed extra arguments
         getCommandRegistry().registerCommand(new ListSpellsCommand(gridMoveManager, roleManager, encounterManager));
-        getCommandRegistry().registerCommand(new CastCommand(gridMoveManager, encounterManager, spellVisualManager, roleManager));
+        getCommandRegistry().registerCommand(new CastCommand(gridMoveManager, encounterManager, spellVisualManager, roleManager, collisionDetector));
         getCommandRegistry().registerCommand(new CastTargetCommand(gridMoveManager, spellVisualManager));
         getCommandRegistry().registerCommand(new CastFinalCommand(gridMoveManager, encounterManager, spellVisualManager, combatSettings, roleManager));
         getCommandRegistry().registerCommand(new CastCancelCommand(gridMoveManager, spellVisualManager, encounterManager, roleManager));

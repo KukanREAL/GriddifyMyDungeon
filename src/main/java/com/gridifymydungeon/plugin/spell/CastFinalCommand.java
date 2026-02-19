@@ -160,35 +160,137 @@ public class CastFinalCommand extends AbstractPlayerCommand {
         boolean isHeal = spell.isHealingSpell();
         boolean casterIsGM = roleManager.isGM(playerRef);
 
+        // ── Collect GM PlayerRef for notifying on monster damage ─────────────
+        PlayerRef gmRef = roleManager.getGM();
+
         int targetsAffected = 0;
 
         if (isHeal) {
             if (casterIsGM) {
-                // GM/monster cast: heal monsters in area
+                // GM healing monsters
                 for (MonsterState monster : encounterManager.getMonsters()) {
                     if (!monster.isAlive()) continue;
                     if (affectedCells.contains(new SpellPatternCalculator.GridCell(monster.currentGridX, monster.currentGridZ))) {
                         targetsAffected++;
-                        if (rollAmount > 0) monster.stats.heal(rollAmount);
+                        if (rollAmount > 0) {
+                            int before = monster.stats.currentHP;
+                            monster.stats.heal(rollAmount);
+                            int after = monster.stats.currentHP;
+                            // Notify GM
+                            if (gmRef != null) {
+                                gmRef.sendMessage(Message.raw("[Griddify] [HEAL] " + monster.getDisplayName()
+                                        + " healed " + (after - before) + " HP → "
+                                        + after + "/" + monster.stats.maxHP).color("#00FF7F"));
+                            }
+                        }
                     }
                 }
             } else {
-                // Player cast: heal players (GridPlayerStates) in area
+                // Player healing players
                 for (com.gridifymydungeon.plugin.gridmove.GridPlayerState ps : playerManager.getAllStates()) {
                     if (ps.npcEntity == null || !ps.npcEntity.isValid()) continue;
                     if (affectedCells.contains(new SpellPatternCalculator.GridCell(ps.currentGridX, ps.currentGridZ))) {
                         targetsAffected++;
-                        if (rollAmount > 0) ps.stats.heal(rollAmount);
+                        if (rollAmount > 0 && ps.playerRef != null) {
+                            int before = ps.stats.currentHP;
+                            ps.stats.heal(rollAmount);
+                            int after = ps.stats.currentHP;
+                            // Notify the healed player
+                            ps.playerRef.sendMessage(Message.raw("[Griddify] [HEAL] Healed " + (after - before)
+                                    + " HP  →  " + after + "/" + ps.stats.maxHP + " HP").color("#00FF7F"));
+                            // Also notify caster if different
+                            if (!ps.playerRef.equals(playerRef)) {
+                                playerRef.sendMessage(Message.raw("[Griddify] [HEAL] " + ps.playerRef.getUsername()
+                                        + ": " + after + "/" + ps.stats.maxHP + " HP").color("#00FF7F"));
+                            }
+                        }
                     }
                 }
             }
         } else {
-            // Damage spell — always hits monsters
-            for (MonsterState monster : encounterManager.getMonsters()) {
-                if (!monster.isAlive()) continue;
-                if (affectedCells.contains(new SpellPatternCalculator.GridCell(monster.currentGridX, monster.currentGridZ))) {
-                    targetsAffected++;
-                    if (rollAmount > 0) monster.takeDamage(rollAmount);
+            // ── DAMAGE ────────────────────────────────────────────────────────
+            // Damage from monsters (GM cast) hits players
+            if (casterIsGM) {
+                for (com.gridifymydungeon.plugin.gridmove.GridPlayerState ps : playerManager.getAllStates()) {
+                    if (ps.npcEntity == null || !ps.npcEntity.isValid()) continue;
+                    if (!ps.stats.isAlive()) continue;
+                    if (affectedCells.contains(new SpellPatternCalculator.GridCell(ps.currentGridX, ps.currentGridZ))) {
+                        targetsAffected++;
+                        if (rollAmount > 0) {
+                            ps.stats.takeDamage(rollAmount);
+                            int remaining = ps.stats.currentHP;
+                            // Notify the hit player privately
+                            if (ps.playerRef != null) {
+                                String hpBar = buildHPBar(remaining, ps.stats.maxHP);
+                                if (remaining == 0) {
+                                    ps.playerRef.sendMessage(Message.raw(
+                                                    "[Griddify] [DEAD] You took " + rollAmount + " "
+                                                            + spell.getDamageType().name().toLowerCase() + " damage!  "
+                                                            + remaining + "/" + ps.stats.maxHP + " HP  " + hpBar)
+                                            .color("#FF0000"));
+                                    ps.playerRef.sendMessage(Message.raw("[Griddify] You are DOWN!").color("#FF0000"));
+                                } else {
+                                    ps.playerRef.sendMessage(Message.raw(
+                                                    "[Griddify] [HIT] You took " + rollAmount + " "
+                                                            + spell.getDamageType().name().toLowerCase() + " damage!  "
+                                                            + remaining + "/" + ps.stats.maxHP + " HP  " + hpBar)
+                                            .color("#FF6B6B"));
+                                }
+                            }
+                            // Notify GM with per-player summary
+                            if (gmRef != null) {
+                                String who = ps.playerRef != null ? ps.playerRef.getUsername() : "Player";
+                                String tag = remaining == 0 ? "[DEAD]" : "[HIT]";
+                                gmRef.sendMessage(Message.raw("[Griddify] " + tag + " " + who
+                                                + " took " + rollAmount + " dmg → "
+                                                + remaining + "/" + ps.stats.maxHP + " HP")
+                                        .color(remaining == 0 ? "#FF0000" : "#FFA500"));
+                            }
+                        }
+                    }
+                }
+            } else {
+                // Player cast hits monsters
+                for (MonsterState monster : encounterManager.getMonsters()) {
+                    if (!monster.isAlive()) continue;
+                    if (affectedCells.contains(new SpellPatternCalculator.GridCell(monster.currentGridX, monster.currentGridZ))) {
+                        targetsAffected++;
+                        if (rollAmount > 0) {
+                            int before = monster.stats.currentHP;
+                            monster.takeDamage(rollAmount);
+                            int after = monster.stats.currentHP;
+                            boolean slain = (after == 0);
+                            String tag = slain ? "[DEAD]" : "[HIT]";
+                            // Notify the attacking player
+                            playerRef.sendMessage(Message.raw("[Griddify] " + tag + " " + monster.getDisplayName()
+                                            + "  -" + rollAmount + " "
+                                            + spell.getDamageType().name().toLowerCase()
+                                            + "  →  " + after + "/" + monster.stats.maxHP + " HP")
+                                    .color(slain ? "#FF0000" : "#FF6B6B"));
+                            // Notify GM
+                            if (gmRef != null && !gmRef.equals(playerRef)) {
+                                String hpBar = buildHPBar(after, monster.stats.maxHP);
+                                gmRef.sendMessage(Message.raw("[Griddify] " + tag + " " + monster.getDisplayName()
+                                                + " took " + rollAmount + " dmg → "
+                                                + after + "/" + monster.stats.maxHP + " HP  " + hpBar)
+                                        .color(slain ? "#FF0000" : "#FFA500"));
+                            }
+                            // Auto-delete monster on death
+                            if (slain) {
+                                final MonsterState deadMonster = monster;
+                                final int deadNum = monster.monsterNumber;
+                                world.execute(() -> {
+                                    com.gridifymydungeon.plugin.dnd.commands.MonsterEntityController.despawnMonster(world, deadMonster);
+                                    encounterManager.removeMonster(deadNum);
+                                    System.out.println("[Griddify] [AUTO-SLAIN] " + deadMonster.getDisplayName() + " auto-removed on death.");
+                                });
+                                if (gmRef != null) {
+                                    gmRef.sendMessage(Message.raw("[Griddify] " + monster.getDisplayName()
+                                            + " automatically removed from encounter.").color("#FF4500"));
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -218,6 +320,10 @@ public class CastFinalCommand extends AbstractPlayerCommand {
             MonsterState castMonster = encounterManager.getControlledMonster();
             castMonster.freeze("post_cast");
             state.unfreeze(); // GM player state doesn't need to stay frozen
+            // Clear the blue monster BFS overlay that was shown during /cast
+            if (state.gridOverlayEnabled && !state.gmMapOverlayActive) {
+                world.execute(() -> com.gridifymydungeon.plugin.gridmove.GridOverlayManager.removeGridOverlay(world, state));
+            }
             playerRef.sendMessage(Message.raw("[Griddify] Monster holds position — walk back to it to move it.").color("#87CEEB"));
         } else {
             // Player: re-freeze NPC at the cast position so it doesn't teleport if the player
@@ -280,5 +386,16 @@ public class CastFinalCommand extends AbstractPlayerCommand {
             System.err.println("[Griddify] Failed to parse damage dice: " + damageDice);
             return 0;
         }
+    }
+
+    /** ASCII health bar: [##########..........] (10 segments) */
+    private static String buildHPBar(int current, int max) {
+        if (max <= 0) return "";
+        int filled = (int) Math.round(10.0 * current / max);
+        filled = Math.max(0, Math.min(10, filled));
+        StringBuilder sb = new StringBuilder("[");
+        for (int i = 0; i < 10; i++) sb.append(i < filled ? "#" : ".");
+        sb.append("]");
+        return sb.toString();
     }
 }

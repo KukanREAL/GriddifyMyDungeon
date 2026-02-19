@@ -54,7 +54,7 @@ public class GridOverlayManager {
     private static boolean modelsAttempted  = false;
 
     private static final int MAX_OVERLAY_CELLS = 150;
-    private static final int GM_MAP_RADIUS     = 50;   // 100x100 (/grid command)
+    private static final int GM_MAP_RADIUS     = 15;   // 30x30 (/grid command)
 
     private static final float MAX_HEIGHT_UP   = 3.0f;
     private static final float MAX_HEIGHT_DOWN = 4.0f;
@@ -68,16 +68,20 @@ public class GridOverlayManager {
     // PUBLIC API
     // ========================================================
 
-    /** Player /gridon — blue tiles, BFS movement range. */
+    /**
+     * Player /gridon — blue tiles, BFS movement range.
+     * gmMapOverlayActive = false  →  refreshGridOverlay runs BFS (not static map).
+     */
     public static boolean spawnPlayerGridOverlay(World world, GridPlayerState state,
                                                  CollisionDetector collisionDetector, UUID excludePlayer) {
         ensureModels();
         Model model = cachedPlayerModel != null ? cachedPlayerModel : cachedDefaultModel;
         if (model == null) return false;
+        removeGridOverlayEntities(world, state);   // clear any previous overlay first
         List<ReachableCell> cells = floodFillReachable(world, state, collisionDetector, excludePlayer);
         spawnCells(world, state, cells, model, 0.02f); // Grid_Player: +0.02 Y offset
         state.gridOverlayEnabled = true;
-        state.gmMapOverlayActive = false;
+        state.gmMapOverlayActive = false;  // BFS mode — not static map
         System.out.println("[GridMove] [GRID] Player overlay: " + cells.size() + " cells");
         return true;
     }
@@ -85,17 +89,18 @@ public class GridOverlayManager {
     /**
      * GM /gridon with monster — blue tiles (Grid_Player), BFS movement range.
      * Same texture as player overlay so it's visually consistent.
+     * gmMapOverlayActive = false  →  refreshGridOverlay runs BFS (not static map).
      */
     public static boolean spawnGMBFSOverlay(World world, GridPlayerState state,
                                             CollisionDetector collisionDetector) {
         ensureModels();
-        // Use the blue player model (same as regular players)
         Model model = cachedPlayerModel != null ? cachedPlayerModel : cachedDefaultModel;
         if (model == null) return false;
+        removeGridOverlayEntities(world, state);   // clear any previous overlay first
         List<ReachableCell> cells = floodFillReachable(world, state, collisionDetector, null);
         spawnCells(world, state, cells, model, 0.02f);
         state.gridOverlayEnabled = true;
-        state.gmMapOverlayActive = false;
+        state.gmMapOverlayActive = false;  // BFS mode — not static map
         System.out.println("[GridMove] [GRID] GM BFS overlay (blue): " + cells.size() + " cells");
         return true;
     }
@@ -106,6 +111,7 @@ public class GridOverlayManager {
         ensureModels();
         Model model = cachedDefaultModel;
         if (model == null) return false;
+        removeGridOverlayEntities(world, state);
         List<ReachableCell> cells = floodFillReachable(world, state, collisionDetector, excludePlayer);
         spawnCells(world, state, cells, model);
         state.gridOverlayEnabled = true;
@@ -115,14 +121,16 @@ public class GridOverlayManager {
     }
 
     /**
-     * GM /grid toggle — flat 100×100 area map, skipping barriers and fluid.
-     * Stays active and refreshes as the monster moves.
-     * Grids spawn at ground level found between -3 and -15 blocks below the GM.
+     * GM /grid toggle — flat 30×30 area map, skipping barriers and fluid.
+     * STATIC: does not move when the GM/monster moves. Type /grid twice to reposition.
+     * gmMapOverlayActive = TRUE  →  this overlay is the static /grid map, not a BFS range.
      */
     public static boolean spawnGMMapOverlay(World world, GridPlayerState gmState) {
         ensureModels();
         Model model = cachedDefaultModel;
         if (model == null) return false;
+
+        removeGridOverlayEntities(world, gmState);  // clear any previous overlay first
 
         int centerX = gmState.currentGridX;
         int centerZ = gmState.currentGridZ;
@@ -142,8 +150,8 @@ public class GridOverlayManager {
         }
         spawnCells(world, gmState, cells, model);
         gmState.gridOverlayEnabled = true;
-        gmState.gmMapOverlayActive = true;  // Mark as map mode so it refreshes on move
-        System.out.println("[GridMove] [GRID] GM map overlay: " + cells.size() + " cells (100x100)");
+        gmState.gmMapOverlayActive = true;  // Mark as static /grid map — refreshGridOverlay stays out
+        System.out.println("[GridMove] [GRID] GM map overlay: " + cells.size() + " cells (30x30)");
         return true;
     }
 
@@ -155,12 +163,11 @@ public class GridOverlayManager {
     public static void refreshGridOverlay(World world, GridPlayerState state,
                                           CollisionDetector collisionDetector, UUID excludePlayer) {
         if (!state.gridOverlayEnabled) return;
-        removeGridOverlayEntities(world, state);
+        // Static /grid map — do NOT auto-refresh on movement; user types /grid again to reposition
+        if (state.gmMapOverlayActive) return;
 
-        if (state.gmMapOverlayActive) {
-            // /grid mode: re-centre the 100x100 map on the new position
-            spawnGMMapOverlay(world, state);
-        } else if (excludePlayer != null) {
+        removeGridOverlayEntities(world, state);
+        if (excludePlayer != null) {
             // Regular player BFS (blue)
             spawnPlayerGridOverlay(world, state, collisionDetector, excludePlayer);
         } else {

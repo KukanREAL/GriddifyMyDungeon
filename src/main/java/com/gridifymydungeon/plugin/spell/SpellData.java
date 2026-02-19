@@ -1,10 +1,13 @@
 package com.gridifymydungeon.plugin.spell;
 
+import com.gridifymydungeon.plugin.spell.MonsterType;
+
 /**
  * Complete spell data structure
  * Supports both:
  * - Base class spells (available level 1+, use classType)
  * - Subclass spells (available level 3+, use subclassType)
+ * - Monster attacks (locked to a specific MonsterType, use monsterAttack constructor)
  */
 public class SpellData {
     private final String name;
@@ -23,7 +26,9 @@ public class SpellData {
     private final boolean persistent;    // Does it last multiple turns?
     private final int durationTurns;     // How many turns (0 = instant)
     private final String description;
-    private final int maxTargets;        // Number of separate aim cursors (1 = normal, >1 = multi-target)
+    private final int maxTargets;
+    /** Non-null means this attack is locked to a specific monster type. */
+    private final MonsterType requiredMonsterType;        // Number of separate aim cursors (1 = normal, >1 = multi-target)
 
     // TODO FUTURE: Add saving throw type (DEX/WIS/CON/etc.)
     // TODO FUTURE: Add status effects (frightened, paralyzed, etc.)
@@ -59,6 +64,7 @@ public class SpellData {
         this.durationTurns = durationTurns;
         this.description = description;
         this.maxTargets = Math.max(1, maxTargets);
+        this.requiredMonsterType = null;
     }
 
     /**
@@ -90,6 +96,31 @@ public class SpellData {
         this.durationTurns = durationTurns;
         this.description = description;
         this.maxTargets = Math.max(1, maxTargets);
+        this.requiredMonsterType = null;
+    }
+
+    /**
+     * Constructor for MONSTER ATTACKS — locked to one MonsterType.
+     * GM can only /cast this when controlling a monster of that exact type.
+     */
+    public SpellData(String name, int rangeGrids, SpellPattern pattern, int areaGrids,
+                     String damageDice, DamageType damageType,
+                     MonsterType requiredMonsterType, String description) {
+        this.name          = name;
+        this.spellLevel    = 0;
+        this.rangeGrids    = rangeGrids;
+        this.pattern       = pattern;
+        this.areaGrids     = areaGrids;
+        this.damageDice    = damageDice;
+        this.damageType    = damageType;
+        this.classType     = null;
+        this.subclassType  = null;
+        this.minLevel      = 1;
+        this.persistent    = false;
+        this.durationTurns = 0;
+        this.description   = description;
+        this.maxTargets    = 1;
+        this.requiredMonsterType = requiredMonsterType;
     }
 
     // Getters
@@ -111,6 +142,9 @@ public class SpellData {
     public String getDescription() { return description; }
     public int getMaxTargets() { return maxTargets; }
     public boolean isMultiTarget() { return maxTargets > 1; }
+    /** Non-null = this attack is only available when controlling this monster type. */
+    public MonsterType getRequiredMonsterType() { return requiredMonsterType; }
+    public boolean isMonsterAttack() { return requiredMonsterType != null; }
 
     /**
      * Calculate spell slot cost

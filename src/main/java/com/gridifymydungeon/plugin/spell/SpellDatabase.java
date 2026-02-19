@@ -1,5 +1,6 @@
 package com.gridifymydungeon.plugin.spell;
 
+import com.gridifymydungeon.plugin.spell.MonsterType;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -954,37 +955,491 @@ public class SpellDatabase {
      * Register a base class spell
      */
     private static void initializeMonsterAttacks() {
-        // Universal monster basic attacks — available to any monster controlled by GM
-        MONSTER_ATTACKS.add(new SpellData(
-                "Scratch",
-                0, 1, SpellPattern.SINGLE_TARGET, 0,
-                "1d4", DamageType.SLASHING,
-                (ClassType) null, 1, false, 0,
-                "Basic claw/scratch attack. Melee, 1 grid range."
-        ));
-        MONSTER_ATTACKS.add(new SpellData(
-                "Hit",
-                0, 1, SpellPattern.SINGLE_TARGET, 0,
-                "1d6", DamageType.BLUDGEONING,
-                (ClassType) null, 1, false, 0,
-                "Basic melee strike. 1 grid range."
-        ));
-        MONSTER_ATTACKS.add(new SpellData(
-                "Bow_Shot",
-                0, 10, SpellPattern.SINGLE_TARGET, 0,
-                "1d8", DamageType.PIERCING,
-                (ClassType) null, 1, false, 0,
-                "Ranged attack. Up to 10 grids."
-        ));
-        // Register all monster attacks in SPELL_MAP so /cast works
+        // Helper: ma(name, range, pattern, area, dice, dmgType, monsterType, desc)
+        // All registered into SPELL_MAP so /cast <name> works.
+
+        // ── GOBLIN ────────────────────────────────────────────────────────────
+        // Scimitar slash (melee single)
+        ma("Goblin_Slash",      1, SpellPattern.SINGLE_TARGET, 0, "1d6",  DamageType.SLASHING,  MonsterType.GOBLIN,
+                "Melee scimitar. 1 grid. DEX-based.");
+        // Shortbow (ranged single)
+        ma("Goblin_Arrow",      8, SpellPattern.SINGLE_TARGET, 0, "1d6",  DamageType.PIERCING,  MonsterType.GOBLIN,
+                "Shortbow shot. 8 grids.");
+        // Disengage dash — no damage, used for flavour (0 dice)
+        ma("Goblin_Nimble",     0, SpellPattern.SELF,          0, null,   DamageType.NONE,       MonsterType.GOBLIN,
+                "Nimble Escape: Bonus action disengage. No damage.");
+
+        // ── GOBLIN LOBBER ─────────────────────────────────────────────────────
+        ma("Goblin_Bomb",       6, SpellPattern.SPHERE,        2, "2d6",  DamageType.FIRE,       MonsterType.GOBLIN_LOBBER,
+                "Fire bomb. 6-grid range, 2-grid blast. DEX save for half.");
+        ma("Goblin_Slash",      1, SpellPattern.SINGLE_TARGET, 0, "1d6",  DamageType.SLASHING,   MonsterType.GOBLIN_LOBBER,
+                "Melee scimitar (fallback). 1 grid.");
+
+        // ── GOBLIN SHAMAN ─────────────────────────────────────────────────────
+        ma("Shaman_HexBolt",    6, SpellPattern.SINGLE_TARGET, 0, "2d6",  DamageType.NECROTIC,   MonsterType.GOBLIN_SHAMAN,
+                "Hex bolt. Ranged necrotic curse, 6 grids.");
+        ma("Shaman_HexCone",    0, SpellPattern.CONE,          3, "2d4",  DamageType.NECROTIC,   MonsterType.GOBLIN_SHAMAN,
+                "Necrotic cone shriek, 3-grid cone.");
+
+        // ── GOBLIN BOSS ───────────────────────────────────────────────────────
+        ma("GoblinBoss_Slash",  1, SpellPattern.SINGLE_TARGET, 0, "2d6",  DamageType.SLASHING,   MonsterType.GOBLIN_BOSS,
+                "Morningstar. Melee 1 grid, 2d6.");
+        ma("GoblinBoss_Arrow",  8, SpellPattern.SINGLE_TARGET, 0, "1d6",  DamageType.PIERCING,   MonsterType.GOBLIN_BOSS,
+                "Shortbow. 8 grids.");
+        ma("GoblinBoss_Redirect",0,SpellPattern.SELF,          0, null,   DamageType.NONE,       MonsterType.GOBLIN_BOSS,
+                "Redirect: Use a reaction to redirect an attack to an adjacent goblin. Flavour only.");
+
+        // ── GOBLIN OGRE ───────────────────────────────────────────────────────
+        ma("Ogre_Slam",         1, SpellPattern.SINGLE_TARGET, 0, "2d8+4",DamageType.BLUDGEONING,MonsterType.GOBLIN_OGRE,
+                "Greatclub slam. Melee 1 grid, 2d8+4.");
+        ma("Ogre_Sweep",        0, SpellPattern.CONE,          2, "1d8+4",DamageType.BLUDGEONING,MonsterType.GOBLIN_OGRE,
+                "Sweeping greatclub arc. 2-grid cone.");
+        ma("Ogre_Javelin",      6, SpellPattern.SINGLE_TARGET, 0, "2d6+4",DamageType.PIERCING,   MonsterType.GOBLIN_OGRE,
+                "Javelin throw. 6 grids.");
+
+        // ── TRORK ─────────────────────────────────────────────────────────────
+        ma("Trork_Axe",         1, SpellPattern.SINGLE_TARGET, 0, "1d12+3",DamageType.SLASHING,  MonsterType.TRORK,
+                "Greataxe. Melee 1 grid.");
+        ma("Trork_Slam",        0, SpellPattern.CONE,          2, "1d8+3", DamageType.BLUDGEONING,MonsterType.TRORK,
+                "Wild swing, 2-grid cone.");
+        ma("Trork_Javelin",     6, SpellPattern.SINGLE_TARGET, 0, "1d6+3", DamageType.PIERCING,  MonsterType.TRORK,
+                "Javelin throw. 6 grids.");
+
+        // ── TRORK SHAMAN ──────────────────────────────────────────────────────
+        ma("TrorkShaman_Bolt",  8, SpellPattern.SINGLE_TARGET, 0, "2d8",  DamageType.LIGHTNING,  MonsterType.TRORK_SHAMAN,
+                "Lightning bolt. 8 grids.");
+        ma("TrorkShaman_Storm", 0, SpellPattern.CYLINDER,      3, "2d6",  DamageType.LIGHTNING,  MonsterType.TRORK_SHAMAN,
+                "Call lightning cylinder, 3-grid radius.");
+        ma("TrorkShaman_Heal",  1, SpellPattern.SINGLE_TARGET, 0, "2d8",  DamageType.NONE,       MonsterType.TRORK_SHAMAN,
+                "Healing touch. Restores 2d8 HP to one adjacent ally.");
+
+        // ── TRORK CHIEFTAIN ───────────────────────────────────────────────────
+        ma("TrorkChief_Axe",    1, SpellPattern.SINGLE_TARGET, 0, "2d12+5",DamageType.SLASHING,  MonsterType.TRORK_CHIEFTAIN,
+                "Greataxe. Melee 1 grid, 2d12+5.");
+        ma("TrorkChief_Sweep",  0, SpellPattern.AURA,          2, "1d10+5",DamageType.SLASHING,  MonsterType.TRORK_CHIEFTAIN,
+                "Whirlwind sweep, 2-grid aura.");
+        ma("TrorkChief_Shout",  0, SpellPattern.CONE,          4, null,   DamageType.NONE,       MonsterType.TRORK_CHIEFTAIN,
+                "War shout cone 4 grids: frightened condition on targets.");
+
+        // ── SKELETON ──────────────────────────────────────────────────────────
+        ma("Skel_Slash",        1, SpellPattern.SINGLE_TARGET, 0, "1d6+2", DamageType.SLASHING,  MonsterType.SKELETON,
+                "Shortsword. Melee 1 grid.");
+        ma("Skel_Dagger",       4, SpellPattern.SINGLE_TARGET, 0, "1d4+2", DamageType.PIERCING,  MonsterType.SKELETON,
+                "Dagger throw. 4 grids.");
+
+        // ── SKELETON ARCHER ───────────────────────────────────────────────────
+        ma("SkelArcher_Arrow",  12, SpellPattern.SINGLE_TARGET, 0,"1d8+2", DamageType.PIERCING,  MonsterType.SKELETON_ARCHER,
+                "Shortbow shot. 12 grids.");
+        ma("SkelArcher_Volley",  8, SpellPattern.SPHERE,         2,"1d6",  DamageType.PIERCING,  MonsterType.SKELETON_ARCHER,
+                "Arrow volley: 2-grid sphere. 8 grids range.");
+        ma("SkelArcher_Slash",   1, SpellPattern.SINGLE_TARGET,  0,"1d6",  DamageType.SLASHING,  MonsterType.SKELETON_ARCHER,
+                "Shortsword fallback. 1 grid.");
+
+        // ── SKELETON KNIGHT ───────────────────────────────────────────────────
+        ma("SkelKnight_Sword",   1, SpellPattern.SINGLE_TARGET, 0, "1d8+3",DamageType.SLASHING,  MonsterType.SKELETON_KNIGHT,
+                "Longsword. Melee 1 grid.");
+        ma("SkelKnight_Sweep",   0, SpellPattern.CONE,          2, "1d8+3",DamageType.SLASHING,  MonsterType.SKELETON_KNIGHT,
+                "Sweeping longsword, 2-grid cone.");
+        ma("SkelKnight_Shield",  0, SpellPattern.SELF,          0, null,   DamageType.NONE,      MonsterType.SKELETON_KNIGHT,
+                "Shield wall: +2 AC until next turn. Flavour/GM tracks manually.");
+
+        // ── SKELETON MAGE ─────────────────────────────────────────────────────
+        ma("SkelMage_Ray",       8, SpellPattern.LINE,           6, "2d6", DamageType.NECROTIC,  MonsterType.SKELETON_MAGE,
+                "Necrotic ray. LINE 6 grids long, 8 range.");
+        ma("SkelMage_Bolt",      6, SpellPattern.SINGLE_TARGET,  0, "2d8", DamageType.COLD,      MonsterType.SKELETON_MAGE,
+                "Ice bolt. 6 grids.");
+        ma("SkelMage_Burst",     0, SpellPattern.SPHERE,         3, "3d6", DamageType.NECROTIC,  MonsterType.SKELETON_MAGE,
+                "Necrotic burst. Centered on self, 3-grid radius.");
+
+        // ── ZOMBIE ────────────────────────────────────────────────────────────
+        ma("Zombie_Slam",        1, SpellPattern.SINGLE_TARGET, 0, "1d6+1",DamageType.BLUDGEONING,MonsterType.ZOMBIE,
+                "Slam. Melee 1 grid. Target must STR save or be grappled.");
+        ma("Zombie_Bite",        1, SpellPattern.SINGLE_TARGET, 0, "2d6+1",DamageType.PIERCING,  MonsterType.ZOMBIE,
+                "Zombie bite. Melee 1 grid.");
+
+        // ── ZOMBIE WEREWOLF ───────────────────────────────────────────────────
+        ma("ZWolf_Bite",         1, SpellPattern.SINGLE_TARGET, 0, "2d8+4",DamageType.PIERCING,  MonsterType.ZOMBIE_WEREWOLF,
+                "Savage bite. 1 grid, 2d8+4.");
+        ma("ZWolf_Claw",         0, SpellPattern.CONE,          2, "2d6+4",DamageType.SLASHING,  MonsterType.ZOMBIE_WEREWOLF,
+                "Claw sweep, 2-grid cone.");
+
+        // ── GHOUL ─────────────────────────────────────────────────────────────
+        ma("Ghoul_Bite",         1, SpellPattern.SINGLE_TARGET, 0, "2d6+2",DamageType.PIERCING,  MonsterType.GHOUL,
+                "Diseased bite. 1 grid. On hit: target CON save or paralyzed.");
+        ma("Ghoul_Claw",         0, SpellPattern.CONE,          2, "2d4+2",DamageType.SLASHING,  MonsterType.GHOUL,
+                "Claw sweep, 2-grid cone.");
+
+        // ── WRAITH ────────────────────────────────────────────────────────────
+        ma("Wraith_Touch",       1, SpellPattern.SINGLE_TARGET, 0, "4d6",  DamageType.NECROTIC,  MonsterType.WRAITH,
+                "Life drain touch. Melee 1 grid, necrotic. Max HP reduced by damage dealt.");
+        ma("Wraith_Ray",         6, SpellPattern.LINE,          4, "3d6",  DamageType.NECROTIC,  MonsterType.WRAITH,
+                "Necrotic ray. LINE 4 grids, 6 range.");
+
+        // ── SHADOW KNIGHT ─────────────────────────────────────────────────────
+        ma("ShadowK_Sword",      1, SpellPattern.SINGLE_TARGET, 0, "2d8+4",DamageType.SLASHING,  MonsterType.SHADOW_KNIGHT,
+                "Shadow blade. Melee 1 grid, 2d8+4.");
+        ma("ShadowK_Wave",       0, SpellPattern.CONE,          3, "3d6",  DamageType.NECROTIC,  MonsterType.SHADOW_KNIGHT,
+                "Shadow wave. 3-grid cone, necrotic.");
+        ma("ShadowK_Step",       0, SpellPattern.SELF,          0, null,   DamageType.NONE,      MonsterType.SHADOW_KNIGHT,
+                "Shadow step: teleport to any shadow within 6 grids. Flavour/GM places.");
+
+        // ── OUTLANDER ─────────────────────────────────────────────────────────
+        ma("Outlander_Axe",      1, SpellPattern.SINGLE_TARGET, 0, "1d8+2",DamageType.SLASHING,  MonsterType.OUTLANDER,
+                "Handaxe. Melee 1 grid.");
+        ma("Outlander_AxeThrow", 5, SpellPattern.SINGLE_TARGET, 0, "1d6+2",DamageType.SLASHING,  MonsterType.OUTLANDER,
+                "Thrown handaxe. 5 grids.");
+
+        // ── OUTLANDER BERSERKER ───────────────────────────────────────────────
+        ma("Berserk_Axe",        1, SpellPattern.SINGLE_TARGET, 0, "2d6+4",DamageType.SLASHING,  MonsterType.OUTLANDER_BERSERKER,
+                "Greataxe, reckless. 1 grid, 2d6+4.");
+        ma("Berserk_Frenzy",     0, SpellPattern.AURA,          1, "1d6+4",DamageType.SLASHING,  MonsterType.OUTLANDER_BERSERKER,
+                "Frenzy: attack all adjacent. 1-grid AURA, 1d6+4.");
+
+        // ── OUTLANDER PRIEST ──────────────────────────────────────────────────
+        ma("Priest_SacredFlame", 6, SpellPattern.SINGLE_TARGET, 0, "2d8",  DamageType.RADIANT,   MonsterType.OUTLANDER_PRIEST,
+                "Sacred flame. 6 grids, DEX save.");
+        ma("Priest_SpiritWave",  0, SpellPattern.CONE,          3, "2d6",  DamageType.RADIANT,   MonsterType.OUTLANDER_PRIEST,
+                "Spirit wave cone. 3-grid radiant.");
+        ma("Priest_Heal",        1, SpellPattern.SINGLE_TARGET, 0, "2d8",  DamageType.NONE,      MonsterType.OUTLANDER_PRIEST,
+                "Healing word. Touch ally, restores 2d8 HP.");
+
+        // ── OUTLANDER SORCERER ────────────────────────────────────────────────
+        ma("Sorc_Fireball",      8, SpellPattern.SPHERE,         3, "6d6", DamageType.FIRE,      MonsterType.OUTLANDER_SORCERER,
+                "Fireball. 8-grid range, 3-grid sphere, 6d6 fire.");
+        ma("Sorc_ArcBolt",       6, SpellPattern.SINGLE_TARGET,  0, "2d10",DamageType.LIGHTNING, MonsterType.OUTLANDER_SORCERER,
+                "Arc bolt. 6 grids, 2d10 lightning.");
+        ma("Sorc_IceRay",        0, SpellPattern.LINE,           8, "3d8", DamageType.COLD,      MonsterType.OUTLANDER_SORCERER,
+                "Ice ray. LINE 8 grids, 3d8 cold.");
+
+        // ── OUTLANDER HUNTER ──────────────────────────────────────────────────
+        ma("Hunter_Arrow",      10, SpellPattern.SINGLE_TARGET,  0, "1d8+2",DamageType.PIERCING, MonsterType.OUTLANDER_HUNTER,
+                "Longbow shot. 10 grids.");
+        ma("Hunter_Volley",      8, SpellPattern.CONE,           3, "1d6",  DamageType.PIERCING, MonsterType.OUTLANDER_HUNTER,
+                "Arrow volley cone. 3-grid cone.");
+
+        // ── SAURIAN ───────────────────────────────────────────────────────────
+        ma("Saurian_Slash",      1, SpellPattern.SINGLE_TARGET, 0, "1d6+2",DamageType.SLASHING,  MonsterType.SAURIAN,
+                "Bladed weapon. 1 grid.");
+        ma("Saurian_Spear",      4, SpellPattern.LINE,          3, "1d6+2",DamageType.PIERCING,  MonsterType.SAURIAN,
+                "Spear thrust. LINE 3 grids, 4 range.");
+
+        // ── SAURIAN ROGUE ─────────────────────────────────────────────────────
+        ma("SaurRogue_Sneak",    1, SpellPattern.SINGLE_TARGET, 0, "3d6+3",DamageType.PIERCING,  MonsterType.SAURIAN_ROGUE,
+                "Sneak attack with dagger. 1 grid, 3d6+3.");
+        ma("SaurRogue_Shadow",   4, SpellPattern.SINGLE_TARGET, 0, "2d6+3",DamageType.PIERCING,  MonsterType.SAURIAN_ROGUE,
+                "Thrown dagger from shadow. 4 grids.");
+
+        // ── SAURIAN WARRIOR ───────────────────────────────────────────────────
+        ma("SaurWarrior_Spear",  1, SpellPattern.SINGLE_TARGET, 0, "1d8+3",DamageType.PIERCING,  MonsterType.SAURIAN_WARRIOR,
+                "Spear. Melee 1 grid.");
+        ma("SaurWarrior_Sweep",  0, SpellPattern.CONE,          2, "1d8+3",DamageType.SLASHING,  MonsterType.SAURIAN_WARRIOR,
+                "Sweeping axe, 2-grid cone.");
+
+        // ── SLOTHIAN ──────────────────────────────────────────────────────────
+        ma("Slothian_Club",      1, SpellPattern.SINGLE_TARGET, 0, "1d6+1",DamageType.BLUDGEONING,MonsterType.SLOTHIAN,
+                "Club strike. 1 grid.");
+        ma("Slothian_Rock",      5, SpellPattern.SINGLE_TARGET, 0, "1d6+1",DamageType.BLUDGEONING,MonsterType.SLOTHIAN,
+                "Rock throw. 5 grids.");
+
+        // ── SLOTHIAN MONK ─────────────────────────────────────────────────────
+        ma("SlothMonk_Strike",   1, SpellPattern.SINGLE_TARGET, 0, "1d6+3",DamageType.BLUDGEONING,MonsterType.SLOTHIAN_MONK,
+                "Unarmed strike. 1 grid.");
+        ma("SlothMonk_Flurry",   0, SpellPattern.CONE,          1, "1d4+3",DamageType.BLUDGEONING,MonsterType.SLOTHIAN_MONK,
+                "Flurry of blows, 1-grid cone (2 hits).");
+        ma("SlothMonk_Stun",     1, SpellPattern.SINGLE_TARGET, 0, "1d6",  DamageType.BLUDGEONING,MonsterType.SLOTHIAN_MONK,
+                "Stunning strike. CON save or stunned.");
+
+        // ── SLOTHIAN ELDER ────────────────────────────────────────────────────
+        ma("SlothElder_Staff",   1, SpellPattern.SINGLE_TARGET, 0, "1d8+2",DamageType.BLUDGEONING,MonsterType.SLOTHIAN_ELDER,
+                "Quarterstaff. 1 grid.");
+        ma("SlothElder_Bolt",    8, SpellPattern.SINGLE_TARGET, 0, "3d8",  DamageType.LIGHTNING,  MonsterType.SLOTHIAN_ELDER,
+                "Lightning bolt. 8 grids.");
+        ma("SlothElder_Heal",    1, SpellPattern.SINGLE_TARGET, 0, "3d8",  DamageType.NONE,       MonsterType.SLOTHIAN_ELDER,
+                "Healing word. Touch ally, 3d8 HP.");
+
+        // ── GOLEM ─────────────────────────────────────────────────────────────
+        ma("Golem_Slam",         1, SpellPattern.SINGLE_TARGET, 0, "2d8+5",DamageType.BLUDGEONING,MonsterType.GOLEM,
+                "Slam. Melee 1 grid, 2d8+5.");
+        ma("Golem_Sweep",        0, SpellPattern.AURA,          1, "1d10+5",DamageType.BLUDGEONING,MonsterType.GOLEM,
+                "Ground slam sweep. 1-grid aura.");
+        ma("Golem_CrystalBurst", 0, SpellPattern.SPHERE,        2, "3d6",  DamageType.FORCE,      MonsterType.GOLEM,
+                "Crystal burst. Self-centred 2-grid sphere.");
+
+        // ── SCARAK ────────────────────────────────────────────────────────────
+        ma("Scarak_Bite",        1, SpellPattern.SINGLE_TARGET, 0, "1d8+3",DamageType.PIERCING,   MonsterType.SCARAK,
+                "Mandible bite. 1 grid.");
+        ma("Scarak_Spit",        5, SpellPattern.SINGLE_TARGET, 0, "1d6",  DamageType.ACID,       MonsterType.SCARAK,
+                "Acid spit. 5 grids, 1d6 acid.");
+        ma("Scarak_PinClaw",     0, SpellPattern.CONE,          2, "1d6+2",DamageType.PIERCING,   MonsterType.SCARAK,
+                "Claw strike cone. 2-grid cone.");
+
+        // ── SCARAK BROODMOTHER ────────────────────────────────────────────────
+        ma("Brood_Bite",         1, SpellPattern.SINGLE_TARGET, 0, "2d8+4",DamageType.PIERCING,   MonsterType.SCARAK_BROODMOTHER,
+                "Massive mandible bite. 1 grid.");
+        ma("Brood_SpitBurst",    6, SpellPattern.SPHERE,        3, "3d6",  DamageType.ACID,       MonsterType.SCARAK_BROODMOTHER,
+                "Acid burst. 6-grid range, 3-grid sphere.");
+        ma("Brood_EggSpit",      8, SpellPattern.SINGLE_TARGET, 0, "2d6",  DamageType.PIERCING,   MonsterType.SCARAK_BROODMOTHER,
+                "Egg projectile. 8 grids. On hit: hatches a Scarak_Louse.");
+
+        // ── VOID CREATURE ─────────────────────────────────────────────────────
+        ma("Void_Claw",          1, SpellPattern.SINGLE_TARGET, 0, "2d6",  DamageType.NECROTIC,   MonsterType.VOID_CREATURE,
+                "Void claw. 1 grid, necrotic.");
+        ma("Void_Ray",           8, SpellPattern.LINE,          5, "3d6",  DamageType.NECROTIC,   MonsterType.VOID_CREATURE,
+                "Void ray. LINE 5 grids, 8 range.");
+        ma("Void_Burst",         0, SpellPattern.SPHERE,        2, "2d8",  DamageType.NECROTIC,   MonsterType.VOID_CREATURE,
+                "Void burst. Self-centred 2-grid sphere.");
+
+        // ── SPIRIT ────────────────────────────────────────────────────────────
+        ma("Spirit_Strike",      1, SpellPattern.SINGLE_TARGET, 0, "2d6",  DamageType.FORCE,      MonsterType.SPIRIT,
+                "Elemental strike. 1 grid, force damage.");
+        ma("Spirit_Pulse",       0, SpellPattern.AURA,          2, "2d6",  DamageType.FORCE,      MonsterType.SPIRIT,
+                "Elemental pulse. 2-grid aura burst.");
+
+        // ── WRAITH ────────────────────────────────────────────────────────────
+        // (already registered above)
+
+        // ── BAT ───────────────────────────────────────────────────────────────
+        ma("Bat_Bite",           1, SpellPattern.SINGLE_TARGET, 0, "1d4",  DamageType.PIERCING,   MonsterType.BAT,
+                "Bat bite. Melee 1 grid.");
+        // Large bat/archaeopteryx claws
+        ma("Bat_DiveClaws",      0, SpellPattern.CONE,          1, "1d6",  DamageType.SLASHING,   MonsterType.BAT,
+                "Diving claw strike. 1-grid cone.");
+
+        // ── BEAR ──────────────────────────────────────────────────────────────
+        ma("Bear_Bite",          1, SpellPattern.SINGLE_TARGET, 0, "1d8+5",DamageType.PIERCING,   MonsterType.BEAR,
+                "Bear bite. 1 grid.");
+        ma("Bear_Claw",          0, SpellPattern.CONE,          2, "1d6+5",DamageType.SLASHING,   MonsterType.BEAR,
+                "Claw swipe. 2-grid cone.");
+
+        // ── WOLF ──────────────────────────────────────────────────────────────
+        ma("Wolf_Bite",          1, SpellPattern.SINGLE_TARGET, 0, "2d4+2",DamageType.PIERCING,   MonsterType.WOLF,
+                "Wolf bite. 1 grid. Target STR save or knocked prone.");
+        ma("Wolf_Pack",          0, SpellPattern.CONE,          2, "1d6+2",DamageType.PIERCING,   MonsterType.WOLF,
+                "Pack lunge. 2-grid cone.");
+
+        // ── BOAR ──────────────────────────────────────────────────────────────
+        ma("Boar_Tusk",          1, SpellPattern.SINGLE_TARGET, 0, "2d6+3",DamageType.SLASHING,   MonsterType.BOAR,
+                "Tusk gore. 1 grid. Target STR save or knocked prone.");
+        ma("Boar_Charge",        3, SpellPattern.LINE,          3, "2d6+3",DamageType.BLUDGEONING,MonsterType.BOAR,
+                "Charge. LINE 3 grids. Target STR save or knocked prone.");
+
+        // ── CROCODILE ─────────────────────────────────────────────────────────
+        ma("Croc_Bite",          1, SpellPattern.SINGLE_TARGET, 0, "1d10+5",DamageType.PIERCING,  MonsterType.CROCODILE,
+                "Bite and grapple. 1 grid, 1d10+5.");
+        ma("Croc_Tail",          0, SpellPattern.CONE,          2, "1d6+5",DamageType.BLUDGEONING,MonsterType.CROCODILE,
+                "Tail slap. 2-grid cone behind.");
+
+        // ── SPIDER ────────────────────────────────────────────────────────────
+        ma("Spider_Bite",        1, SpellPattern.SINGLE_TARGET, 0, "1d8",  DamageType.PIERCING,   MonsterType.SPIDER,
+                "Venomous bite. 1 grid, 1d8 piercing + CON save or 2d8 poison.");
+        ma("Spider_Web",         4, SpellPattern.CUBE,          2, null,   DamageType.NONE,       MonsterType.SPIDER,
+                "Web. 4-grid range, 2-grid cube. STR save or restrained.");
+
+        // ── SNAKE ─────────────────────────────────────────────────────────────
+        ma("Snake_Bite",         1, SpellPattern.SINGLE_TARGET, 0, "1d4",  DamageType.PIERCING,   MonsterType.SNAKE,
+                "Bite. 1 grid, 1d4 + CON save or 3d6 poison.");
+        ma("Snake_Constrict",    1, SpellPattern.SINGLE_TARGET, 0, "1d8+3",DamageType.BLUDGEONING,MonsterType.SNAKE,
+                "Constrict. 1 grid, grappled and restrained on hit.");
+
+        // ── SCORPION ──────────────────────────────────────────────────────────
+        ma("Scorpion_Claw",      1, SpellPattern.SINGLE_TARGET, 0, "1d8",  DamageType.BLUDGEONING,MonsterType.SCORPION,
+                "Claw grapple. 1 grid, grappled on hit.");
+        ma("Scorpion_Sting",     1, SpellPattern.SINGLE_TARGET, 0, "1d8",  DamageType.PIERCING,   MonsterType.SCORPION,
+                "Stinger. 1 grid, 1d8 + CON save or 4d10 poison.");
+
+        // ── BIG CAT ───────────────────────────────────────────────────────────
+        ma("BigCat_Bite",        1, SpellPattern.SINGLE_TARGET, 0, "1d8+4",DamageType.PIERCING,   MonsterType.BIG_CAT,
+                "Bite. 1 grid.");
+        ma("BigCat_Pounce",      3, SpellPattern.LINE,          3, "2d6+4",DamageType.SLASHING,   MonsterType.BIG_CAT,
+                "Pounce. LINE 3 grids. STR save or prone + bite attack.");
+        ma("BigCat_Claw",        0, SpellPattern.CONE,          2, "1d6+4",DamageType.SLASHING,   MonsterType.BIG_CAT,
+                "Claw swipe. 2-grid cone.");
+
+        // ── RAPTOR ────────────────────────────────────────────────────────────
+        ma("Raptor_Bite",        1, SpellPattern.SINGLE_TARGET, 0, "1d8+4",DamageType.PIERCING,   MonsterType.RAPTOR,
+                "Bite. 1 grid.");
+        ma("Raptor_Slash",       0, SpellPattern.CONE,          2, "1d6+4",DamageType.SLASHING,   MonsterType.RAPTOR,
+                "Claw slash. 2-grid cone.");
+
+        // ── REX ───────────────────────────────────────────────────────────────
+        ma("Rex_Bite",           1, SpellPattern.SINGLE_TARGET, 0, "4d12+7",DamageType.PIERCING,  MonsterType.REX,
+                "Massive bite. 1 grid, 4d12+7.");
+        ma("Rex_Stomp",          0, SpellPattern.AURA,          2, "2d10+7",DamageType.BLUDGEONING,MonsterType.REX,
+                "Ground stomp. 2-grid aura. DEX save or knocked prone.");
+        ma("Rex_Roar",           0, SpellPattern.CONE,          5, null,   DamageType.NONE,       MonsterType.REX,
+                "Terrifying roar. 5-grid cone. WIS save or frightened.");
+
+        // ── PTERODACTYL ───────────────────────────────────────────────────────
+        ma("Ptero_Bite",         1, SpellPattern.SINGLE_TARGET, 0, "2d6+4",DamageType.PIERCING,   MonsterType.PTERODACTYL,
+                "Dive-bite. 1 grid.");
+        ma("Ptero_Claw",         0, SpellPattern.CONE,          2, "1d8+4",DamageType.SLASHING,   MonsterType.PTERODACTYL,
+                "Claw sweep dive. 2-grid cone.");
+
+        // ── SHARK ─────────────────────────────────────────────────────────────
+        ma("Shark_Bite",         1, SpellPattern.SINGLE_TARGET, 0, "2d8+4",DamageType.PIERCING,   MonsterType.SHARK,
+                "Bite. 1 grid, 2d8+4.");
+
+        // ── MOOSE ─────────────────────────────────────────────────────────────
+        ma("Moose_Gore",         1, SpellPattern.SINGLE_TARGET, 0, "2d8+5",DamageType.PIERCING,   MonsterType.MOOSE,
+                "Antler gore. 1 grid.");
+        ma("Moose_Stomp",        0, SpellPattern.AURA,          1, "2d6+5",DamageType.BLUDGEONING,MonsterType.MOOSE,
+                "Hooves stomp. 1-grid aura.");
+
+        // ── WARTHOG ───────────────────────────────────────────────────────────
+        ma("Warthog_Tusk",       1, SpellPattern.SINGLE_TARGET, 0, "2d6+3",DamageType.SLASHING,   MonsterType.WARTHOG,
+                "Tusk gore. 1 grid.");
+        ma("Warthog_Charge",     3, SpellPattern.LINE,          3, "2d6+3",DamageType.BLUDGEONING,MonsterType.WARTHOG,
+                "Charge. LINE 3 grids.");
+
+        // ── YETI ──────────────────────────────────────────────────────────────
+        ma("Yeti_Slam",          1, SpellPattern.SINGLE_TARGET, 0, "2d6+5",DamageType.BLUDGEONING,MonsterType.YETI,
+                "Fist slam. 1 grid.");
+        ma("Yeti_ColdBreath",    0, SpellPattern.CONE,          4, "4d6",  DamageType.COLD,       MonsterType.YETI,
+                "Cold breath. 4-grid cone. CON save for half.");
+        ma("Yeti_Chilling",      1, SpellPattern.SINGLE_TARGET, 0, "1d6",  DamageType.COLD,       MonsterType.YETI,
+                "Chilling gaze. 1 grid, CON save or restrained.");
+
+        // ── WEREWOLF ──────────────────────────────────────────────────────────
+        ma("Werewolf_Bite",      1, SpellPattern.SINGLE_TARGET, 0, "2d8+4",DamageType.PIERCING,   MonsterType.WEREWOLF,
+                "Bite. 1 grid, 2d8+4. CON save or lycanthropy curse.");
+        ma("Werewolf_Claw",      0, SpellPattern.CONE,          2, "2d6+4",DamageType.SLASHING,   MonsterType.WEREWOLF,
+                "Claw swipe. 2-grid cone.");
+
+        // ── ZOMBIE WEREWOLF ───────────────────────────────────────────────────
+        ma("ZWolf_Bite",         1, SpellPattern.SINGLE_TARGET, 0, "2d8+4",DamageType.PIERCING,   MonsterType.ZOMBIE_WEREWOLF,
+                "Savage bite. 1 grid.");
+        ma("ZWolf_Claw",         0, SpellPattern.CONE,          2, "2d6+4",DamageType.SLASHING,   MonsterType.ZOMBIE_WEREWOLF,
+                "Claw sweep. 2-grid cone.");
+
+        // ── FERAN ─────────────────────────────────────────────────────────────
+        ma("Feran_Gore",         1, SpellPattern.SINGLE_TARGET, 0, "2d6+4",DamageType.PIERCING,   MonsterType.FERAN,
+                "Antler gore. 1 grid.");
+        ma("Feran_Kick",         0, SpellPattern.CONE,          1, "1d8+4",DamageType.BLUDGEONING,MonsterType.FERAN,
+                "Hoof kick. 1-grid cone.");
+
+        // ── FERAN WINDWALKER ──────────────────────────────────────────────────
+        ma("WindFeran_Dive",     1, SpellPattern.SINGLE_TARGET, 0, "2d6+4",DamageType.SLASHING,   MonsterType.FERAN_WINDWALKER,
+                "Diving gore. 1 grid from flight.");
+        ma("WindFeran_Gust",     0, SpellPattern.CONE,          4, "2d6",  DamageType.BLUDGEONING,MonsterType.FERAN_WINDWALKER,
+                "Wind gust. 4-grid cone, STR save or pushed back 2 grids.");
+        ma("WindFeran_Vortex",   0, SpellPattern.CYLINDER,      3, "3d6",  DamageType.BLUDGEONING,MonsterType.FERAN_WINDWALKER,
+                "Wind vortex cylinder. 3-grid radius below.");
+
+        // ── BRAMBLEKIN ────────────────────────────────────────────────────────
+        ma("Bramble_Whip",       2, SpellPattern.LINE,           2, "1d6+1",DamageType.PIERCING,  MonsterType.BRAMBLEKIN,
+                "Thorn whip. LINE 2 grids, pulls target 1 grid closer.");
+        ma("Bramble_Spines",     0, SpellPattern.AURA,           1, "1d4",  DamageType.PIERCING,  MonsterType.BRAMBLEKIN,
+                "Spine aura. 1-grid burst, 1d4 piercing.");
+
+        // ── BRAMBLEKIN SHAMAN ─────────────────────────────────────────────────
+        ma("BrambleShaman_Whip", 3, SpellPattern.SINGLE_TARGET,  0, "2d6",  DamageType.PIERCING,  MonsterType.BRAMBLEKIN_SHAMAN,
+                "Thorn whip. 3 grids.");
+        ma("BrambleShaman_Entangle",5,SpellPattern.CUBE,          3, null,   DamageType.NONE,      MonsterType.BRAMBLEKIN_SHAMAN,
+                "Entangle. 5-grid range, 3-grid cube. STR save or restrained.");
+        ma("BrambleShaman_Spike",0, SpellPattern.SPHERE,         2, "3d4",  DamageType.PIERCING,  MonsterType.BRAMBLEKIN_SHAMAN,
+                "Spike burst. Self-centred 2-grid sphere.");
+
+        // ── FEN STALKER ───────────────────────────────────────────────────────
+        ma("Fen_Claw",           1, SpellPattern.SINGLE_TARGET,  0, "2d6+3",DamageType.SLASHING,  MonsterType.FEN_STALKER,
+                "Claw rake. 1 grid.");
+        ma("Fen_ToxicSpray",     0, SpellPattern.CONE,           3, "3d6",  DamageType.POISON,    MonsterType.FEN_STALKER,
+                "Toxic spray. 3-grid cone. CON save for half.");
+        ma("Fen_Drag",           1, SpellPattern.SINGLE_TARGET,  0, "1d6+3",DamageType.SLASHING,  MonsterType.FEN_STALKER,
+                "Drag. 1 grid, STR save or grappled + pulled into swamp.");
+
+        // ── SNAPJAW ───────────────────────────────────────────────────────────
+        ma("Snapjaw_Bite",       1, SpellPattern.SINGLE_TARGET,  0, "1d8+4",DamageType.PIERCING,  MonsterType.SNAPJAW,
+                "Bite. 1 grid, 1d8+4.");
+
+        // ── SLUG MAGMA ────────────────────────────────────────────────────────
+        ma("Slug_LavaGlob",      4, SpellPattern.SINGLE_TARGET,  0, "2d6",  DamageType.FIRE,      MonsterType.SLUG_MAGMA,
+                "Lava glob. 4 grids, 2d6 fire.");
+        ma("Slug_LavaBurst",     0, SpellPattern.SPHERE,         2, "3d6",  DamageType.FIRE,      MonsterType.SLUG_MAGMA,
+                "Lava burst. Self-centred 2-grid sphere.");
+
+        // ── EMBERWULF ─────────────────────────────────────────────────────────
+        ma("Ember_Bite",         1, SpellPattern.SINGLE_TARGET,  0, "2d6+4",DamageType.FIRE,      MonsterType.EMBER_WULF,
+                "Ember bite. 1 grid, 2d6+4 fire.");
+        ma("Ember_Breath",       0, SpellPattern.CONE,           4, "4d6",  DamageType.FIRE,      MonsterType.EMBER_WULF,
+                "Fire breath. 4-grid cone, 4d6 fire. DEX save for half.");
+
+        // ── TRILLODON ─────────────────────────────────────────────────────────
+        ma("Trillo_Bite",        1, SpellPattern.SINGLE_TARGET,  0, "2d8+5",DamageType.PIERCING,  MonsterType.TRILLODON,
+                "Crushing bite. 1 grid.");
+        ma("Trillo_Charge",      4, SpellPattern.LINE,           4, "2d6+5",DamageType.BLUDGEONING,MonsterType.TRILLODON,
+                "Charge. LINE 4 grids, STR save or prone.");
+
+        // ── TOAD RHINO ────────────────────────────────────────────────────────
+        ma("ToadRhino_Gore",     1, SpellPattern.SINGLE_TARGET,  0, "2d8+5",DamageType.PIERCING,  MonsterType.TOAD_RHINO,
+                "Horn gore. 1 grid.");
+        ma("ToadRhino_Charge",   4, SpellPattern.LINE,           4, "2d8+5",DamageType.BLUDGEONING,MonsterType.TOAD_RHINO,
+                "Charge. LINE 4 grids.");
+        ma("ToadRhino_Stomp",    0, SpellPattern.AURA,           1, "2d6+5",DamageType.BLUDGEONING,MonsterType.TOAD_RHINO,
+                "Stomp. 1-grid aura. DEX save or knocked prone.");
+
+        // ── SPARK LIVING ──────────────────────────────────────────────────────
+        ma("Spark_ZapBolt",      6, SpellPattern.LINE,           4, "2d6",  DamageType.LIGHTNING,  MonsterType.SPARK_LIVING,
+                "Lightning bolt. LINE 4 grids.");
+        ma("Spark_ChainArc",     4, SpellPattern.CHAIN,          0, "1d8",  DamageType.LIGHTNING,  MonsterType.SPARK_LIVING,
+                "Chain lightning. Arcs to nearest 2 targets.");
+
+        // ── TORNADO ───────────────────────────────────────────────────────────
+        ma("Tornado_Vortex",     0, SpellPattern.AURA,           3, "3d6",  DamageType.BLUDGEONING,MonsterType.TORNADO,
+                "Wind vortex. 3-grid aura. STR save or flung 2 grids.");
+        ma("Tornado_Slam",       0, SpellPattern.CYLINDER,       4, "4d8",  DamageType.BLUDGEONING,MonsterType.TORNADO,
+                "Tornado column. 4-grid cylinder. DEX save for half.");
+
+        // ── DRAGON: FIRE ──────────────────────────────────────────────────────
+        ma("DragonFire_Bite",    1, SpellPattern.SINGLE_TARGET,  0, "2d10+7",DamageType.PIERCING,  MonsterType.DRAGON_FIRE,
+                "Dragon bite. 1 grid.");
+        ma("DragonFire_Claw",    0, SpellPattern.CONE,           2, "2d6+7", DamageType.SLASHING,  MonsterType.DRAGON_FIRE,
+                "Claw sweep. 2-grid cone.");
+        ma("DragonFire_Breath",  0, SpellPattern.CONE,          12, "18d6",  DamageType.FIRE,       MonsterType.DRAGON_FIRE,
+                "Fire breath. 12-grid cone, 18d6. DEX save for half. Recharge 5-6.");
+        ma("DragonFire_Tail",    0, SpellPattern.LINE,           5, "2d8+7", DamageType.BLUDGEONING,MonsterType.DRAGON_FIRE,
+                "Tail slap. LINE 5 grids behind.");
+
+        // ── DRAGON: FROST ─────────────────────────────────────────────────────
+        ma("DragonFrost_Bite",   1, SpellPattern.SINGLE_TARGET,  0, "2d10+7",DamageType.PIERCING,  MonsterType.DRAGON_FROST,
+                "Dragon bite. 1 grid.");
+        ma("DragonFrost_Claw",   0, SpellPattern.CONE,           2, "2d6+7", DamageType.SLASHING,  MonsterType.DRAGON_FROST,
+                "Claw sweep. 2-grid cone.");
+        ma("DragonFrost_Breath", 0, SpellPattern.CONE,          12, "12d8",  DamageType.COLD,       MonsterType.DRAGON_FROST,
+                "Cold breath. 12-grid cone, 12d8. CON save for half. Recharge 5-6.");
+        ma("DragonFrost_Tail",   0, SpellPattern.LINE,           5, "2d8+7", DamageType.BLUDGEONING,MonsterType.DRAGON_FROST,
+                "Tail slap. LINE 5 grids.");
+
+        // ── DRAGON: VOID ──────────────────────────────────────────────────────
+        ma("DragonVoid_Bite",    1, SpellPattern.SINGLE_TARGET,  0, "2d10+9",DamageType.PIERCING,  MonsterType.DRAGON_VOID,
+                "Dragon bite. 1 grid.");
+        ma("DragonVoid_Claw",    0, SpellPattern.CONE,           2, "2d6+9", DamageType.SLASHING,  MonsterType.DRAGON_VOID,
+                "Claw sweep. 2-grid cone.");
+        ma("DragonVoid_Breath",  0, SpellPattern.CONE,          12, "14d8",  DamageType.NECROTIC,   MonsterType.DRAGON_VOID,
+                "Void breath. 12-grid cone, 14d8 necrotic. CON save for half. Recharge 5-6.");
+        ma("DragonVoid_VoidRip", 8, SpellPattern.SPHERE,         4, "8d8",   DamageType.NECROTIC,   MonsterType.DRAGON_VOID,
+                "Void tear. 8-grid range, 4-grid sphere. Spell once per day.");
+        ma("DragonVoid_Tail",    0, SpellPattern.LINE,           5, "2d8+9", DamageType.BLUDGEONING,MonsterType.DRAGON_VOID,
+                "Tail slap. LINE 5 grids.");
+
+        // Register all monster attacks in SPELL_MAP so /cast <name> works
         for (SpellData atk : MONSTER_ATTACKS) {
             SPELL_MAP.put(atk.getName().toLowerCase(), atk);
         }
     }
 
-    /** Get universal monster basic attacks */
-    public static List<SpellData> getMonsterAttacks() {
-        return java.util.Collections.unmodifiableList(MONSTER_ATTACKS);
+    /** Shorthand to register a monster attack */
+    private static void ma(String name, int range, SpellPattern pattern, int area,
+                           String dice, DamageType dmgType, MonsterType mt, String desc) {
+        MONSTER_ATTACKS.add(new SpellData(name, range, pattern, area, dice, dmgType, mt, desc));
+    }
+
+    /** Get all attacks available to a specific monster type */
+    public static List<SpellData> getAttacksForMonsterType(MonsterType mt) {
+        List<SpellData> result = new java.util.ArrayList<>();
+        for (SpellData s : MONSTER_ATTACKS) {
+            if (s.getRequiredMonsterType() == mt) result.add(s);
+        }
+        return result;
     }
 
     private static void registerBase(SpellData spell) {

@@ -91,9 +91,11 @@ public class PlayerPositionTracker {
 
         if (!isCasting && state.isFrozen) {
             if ("post_cast".equals(state.freezeReason)) {
-                // After casting: unfreeze when player moves to a DIFFERENT cell
-                if (newGridX != state.currentGridX || newGridZ != state.currentGridZ) {
+                // After casting: NPC stays put. Unfreeze only when player walks back to the NPC's cell.
+                if (newGridX == state.frozenGridX && newGridZ == state.frozenGridZ) {
                     state.unfreeze();
+                    playerRef.sendMessage(com.hypixel.hytale.server.core.Message.raw(
+                            "[Griddify] NPC unfrozen — ready to move!").color("#00FF7F"));
                 }
             } else if (newGridX == state.currentGridX && newGridZ == state.currentGridZ) {
                 // Collision-freeze: player walked back to NPC cell — unfreeze
@@ -138,10 +140,23 @@ public class PlayerPositionTracker {
                     final com.gridifymydungeon.plugin.spell.Direction8 dir = castState.getDirection();
                     final com.gridifymydungeon.plugin.spell.SpellData spellData = castState.getSpell();
                     final int cx = castState.getCasterGridX(), cz = castState.getCasterGridZ();
+                    // Capture confirmed targets so we can keep them visible for multi-target spells
+                    final java.util.List<SpellCastingState.GridCell> confirmed =
+                            new java.util.ArrayList<>(castState.getConfirmedTargets());
                     world.execute(() -> {
                         java.util.Set<SpellPatternCalculator.GridCell> cells =
                                 com.gridifymydungeon.plugin.spell.CastCommand.computeOverlay(
                                         pattern, dir, cx, cz, spellData, px, pz);
+                        // Also keep previously confirmed target cells visible
+                        for (SpellCastingState.GridCell c : confirmed) {
+                            cells.add(new SpellPatternCalculator.GridCell(c.x, c.z));
+                        }
+                        System.out.println("[Griddify] [CASTOVERLAY] " + spellData.getName()
+                                + " pattern=" + pattern.name()
+                                + " dir=" + dir.name()
+                                + " caster=(" + cx + "," + cz + ")"
+                                + " player=(" + px + "," + pz + ")"
+                                + " cells=" + cells.size());
                         spellVisualManager.showSpellArea(playerRef.getUuid(), cells, world, py);
                     });
                 }

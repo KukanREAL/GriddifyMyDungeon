@@ -1,7 +1,9 @@
 package com.gridifymydungeon.plugin.spell;
 
 import com.gridifymydungeon.plugin.dnd.EncounterManager;
+import com.gridifymydungeon.plugin.gridmove.CollisionDetector;
 import com.gridifymydungeon.plugin.gridmove.GridMoveManager;
+import com.gridifymydungeon.plugin.gridmove.GridOverlayManager;
 import com.gridifymydungeon.plugin.gridmove.GridPlayerState;
 import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.component.Store;
@@ -38,15 +40,18 @@ public class CastCommand extends AbstractPlayerCommand {
     private final EncounterManager encounterManager;
     private final SpellVisualManager visualManager;
     private final com.gridifymydungeon.plugin.dnd.RoleManager roleManager;
+    private final CollisionDetector collisionDetector;
     private final RequiredArg<String> spellNameArg;
 
     public CastCommand(GridMoveManager playerManager, EncounterManager encounterManager,
-                       SpellVisualManager visualManager, com.gridifymydungeon.plugin.dnd.RoleManager roleManager) {
+                       SpellVisualManager visualManager, com.gridifymydungeon.plugin.dnd.RoleManager roleManager,
+                       CollisionDetector collisionDetector) {
         super("Cast", "Prepare to cast a spell");
         this.playerManager = playerManager;
         this.encounterManager = encounterManager;
         this.visualManager = visualManager;
         this.roleManager = roleManager;
+        this.collisionDetector = collisionDetector;
         this.spellNameArg = this.withRequiredArg("spell", "Spell name", ArgTypes.STRING);
     }
 
@@ -63,6 +68,7 @@ public class CastCommand extends AbstractPlayerCommand {
             return;
         }
         // GM controlling a monster uses the monster's position — no personal /gridmove needed
+        // Regular players must have their NPC entity active
         if (!isGmControlling && (state.npcEntity == null || !state.npcEntity.isValid())) {
             playerRef.sendMessage(Message.raw("[Griddify] Enable grid movement first! Use /GridMove").color("#FF0000"));
             return;
@@ -79,7 +85,14 @@ public class CastCommand extends AbstractPlayerCommand {
             return;
         }
         if (!canAccessSpell(state, spell, playerRef)) {
-            if (spell.isSubclassSpell()) {
+            if (spell.isMonsterAttack()) {
+                com.gridifymydungeon.plugin.dnd.MonsterState controlled = encounterManager.getControlledMonster();
+                String required = spell.getRequiredMonsterType() != null ? spell.getRequiredMonsterType().name() : "?";
+                String have = (controlled != null && controlled.monsterType != null) ? controlled.monsterType.name() : "none";
+                playerRef.sendMessage(Message.raw("[Griddify] Wrong monster type! "
+                        + spell.getName() + " requires " + required
+                        + " (controlling: " + have + ")").color("#FF0000"));
+            } else if (spell.isSubclassSpell()) {
                 playerRef.sendMessage(Message.raw("[Griddify] Wrong subclass! Required: " +
                         spell.getSubclass().getDisplayName()).color("#FF0000"));
             } else if (spell.getClassType() == null) {
@@ -150,7 +163,20 @@ public class CastCommand extends AbstractPlayerCommand {
         // For GM controlling a monster: freeze the MONSTER so GMPositionTracker
         // stops moving it. GM body movement will instead aim the spell overlay.
         if (isGmControlling) {
-            encounterManager.getControlledMonster().freeze("casting");
+            com.gridifymydungeon.plugin.dnd.MonsterState mon = encounterManager.getControlledMonster();
+            mon.freeze("casting");
+            // Spawn blue movement-range overlay for the monster (same as players see on their turn)
+            final com.gridifymydungeon.plugin.dnd.MonsterState monFinal = mon;
+            final GridPlayerState gmState = state;
+            world.execute(() -> {
+                // Temporarily configure gmState with monster position/moves so BFS uses them
+                gmState.currentGridX   = monFinal.currentGridX;
+                gmState.currentGridZ   = monFinal.currentGridZ;
+                gmState.npcY           = monFinal.spawnY;
+                gmState.remainingMoves = monFinal.remainingMoves;
+                gmState.maxMoves       = monFinal.maxMoves;
+                GridOverlayManager.spawnGMBFSOverlay(world, gmState, collisionDetector);
+            });
         }
         state.freeze("casting");
         state.setSpellCastingState(new SpellCastingState(spell, null, initialDirection, casterGridX, casterGridZ, casterY));
@@ -230,11 +256,22 @@ public class CastCommand extends AbstractPlayerCommand {
         try { return (float) playerRef.getTransform().getPosition().getY(); } catch (Exception e) { return 0f; }
     }
     private boolean canAccessSpell(GridPlayerState state, SpellData spell, PlayerRef playerRef) {
-        // Monster basic attacks (classType == null) - only GM controlling a monster can use them
+        // ── Monster-type-locked attack ────────────────────────────────────────
+        // Only usable when the GM controls a monster of the exact required type.
+        if (spell.isMonsterAttack()) {
+            if (!roleManager.isGM(playerRef)) return false;
+            com.gridifymydungeon.plugin.dnd.MonsterState controlled = encounterManager.getControlledMonster();
+            if (controlled == null) return false;
+            return spell.getRequiredMonsterType() == controlled.monsterType;
+        }
+
+        // ── Old generic monster attacks (classType == null, not locked) ───────
+        // Kept for backwards-compat; in practice no longer registered this way.
         if (spell.getClassType() == null && !spell.isSubclassSpell()) {
             return roleManager.isGM(playerRef) && encounterManager.getControlledMonster() != null;
         }
-        // GM controlling a monster with a class uses the monster's class
+
+        // ── GM controlling a monster with a player-class ──────────────────────
         if (roleManager.isGM(playerRef)) {
             com.gridifymydungeon.plugin.dnd.MonsterState controlled = encounterManager.getControlledMonster();
             if (controlled != null) {
@@ -242,7 +279,8 @@ public class CastCommand extends AbstractPlayerCommand {
                 return spell.getClassType() == controlled.stats.getClassType();
             }
         }
-        // Regular player: check their own class
+
+        // ── Regular player ────────────────────────────────────────────────────
         if (spell.isSubclassSpell()) return spell.getSubclass() == state.stats.getSubclassType();
         return spell.getClassType() == state.stats.getClassType();
     }

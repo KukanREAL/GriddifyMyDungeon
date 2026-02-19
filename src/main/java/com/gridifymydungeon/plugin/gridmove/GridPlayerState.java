@@ -37,6 +37,9 @@ public class GridPlayerState {
     // Freeze tracking
     public boolean isFrozen = false;
     public String freezeReason = null;
+    /** Grid position where the NPC was frozen (used by post_cast unfreeze: player must walk back here). */
+    public int frozenGridX = 0;
+    public int frozenGridZ = 0;
 
     // Character stats
     public CharacterStats stats;
@@ -108,6 +111,8 @@ public class GridPlayerState {
     public void freeze(String reason) {
         this.isFrozen = true;
         this.freezeReason = reason;
+        this.frozenGridX = this.currentGridX;
+        this.frozenGridZ = this.currentGridZ;
     }
 
     public void unfreeze() {

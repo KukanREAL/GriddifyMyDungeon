@@ -50,19 +50,23 @@ public class CastCancelCommand extends AbstractPlayerCommand {
         String spellName = state.getSpellCastingState().getSpell().getName();
 
         state.clearSpellCastingState();
-        state.unfreeze();
-        visualManager.clearSpellVisuals(playerRef.getUuid(), world);
+        world.execute(() -> visualManager.clearSpellVisuals(playerRef.getUuid(), world));
 
-        // For GM: also unfreeze the monster immediately so it can move again
+        // For GM: unfreeze monster immediately so it can keep moving
         if (roleManager.isGM(playerRef)) {
             MonsterState monster = encounterManager.getControlledMonster();
             if (monster != null && monster.isFrozen && "casting".equals(monster.freezeReason)) {
                 monster.unfreeze();
             }
+            state.unfreeze();
             playerRef.sendMessage(Message.raw("[Griddify] " + spellName + " cancelled. Monster unfrozen.").color("#FFA500"));
         } else {
+            // Player: NPC stays frozen at its current position.
+            // Re-freeze with "post_cast" so the player must walk BACK to the NPC cell to unfreeze.
+            state.freeze("post_cast");
             playerRef.sendMessage(Message.raw("[Griddify] " + spellName + " cancelled.").color("#FFA500"));
-            playerRef.sendMessage(Message.raw("[Griddify] Walk back to your NPC to unfreeze it.").color("#AAAAAA"));
+            playerRef.sendMessage(Message.raw("[Griddify] Walk back to your NPC at ("
+                    + state.frozenGridX + ", " + state.frozenGridZ + ") to unfreeze it.").color("#AAAAAA"));
         }
 
         System.out.println("[Griddify] [CASTCANCEL] " + playerRef.getUsername() + " cancelled " + spellName);
