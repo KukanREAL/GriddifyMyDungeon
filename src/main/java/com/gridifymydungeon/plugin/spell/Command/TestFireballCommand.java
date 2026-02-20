@@ -1,4 +1,4 @@
-package com.gridifymydungeon.plugin.spell.commands;
+package com.gridifymydungeon.plugin.spell.Command;
 
 import com.gridifymydungeon.plugin.spell.FireballSpawner;
 import com.hypixel.hytale.component.Ref;

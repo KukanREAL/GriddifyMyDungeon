@@ -201,7 +201,7 @@ public class GridMovePlugin extends JavaPlugin {
         getCommandRegistry().registerCommand(new GridHelpCommand(roleManager));
 
         // Dev/test commands
-        getCommandRegistry().registerCommand(new com.gridifymydungeon.plugin.spell.commands.TestFireballCommand());
+        getCommandRegistry().registerCommand(new com.gridifymydungeon.plugin.spell.Command.TestFireballCommand());
 
         getLogger().at(Level.INFO).log("Registered all commands successfully!");
     }
