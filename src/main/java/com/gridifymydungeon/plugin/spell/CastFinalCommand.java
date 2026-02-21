@@ -8,6 +8,8 @@ import com.gridifymydungeon.plugin.gridmove.GridMoveManager;
 import com.gridifymydungeon.plugin.gridmove.GridPlayerState;
 import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.component.Store;
+import com.hypixel.hytale.math.vector.Vector3d;
+import com.hypixel.hytale.math.vector.Vector3f;
 import com.hypixel.hytale.protocol.ItemWithAllMetadata;
 import com.hypixel.hytale.protocol.packets.interface_.NotificationStyle;
 import com.hypixel.hytale.server.core.Message;
@@ -27,9 +29,12 @@ import java.util.Set;
 
 /**
  * /CastFinal - Execute the prepared spell.
- * Resolves target from the player's CURRENT real-world position (used to aim while NPC was frozen).
- * Verifies the aimed cell is within range of the FROZEN NPC position.
- * Unfreezes the NPC after casting.
+ *
+ * CHANGED: Added Fire_Bolt visual projectile launch.
+ * When a SORCERER casts Fire_Bolt (/Cast Fire_Bolt → walk to aim → /CastFinal),
+ * after the normal damage resolution a Fire_BoltProjectile is launched from the
+ * player's NPC position to the aimed grid cell as a visual effect.
+ * No other spells are affected. All existing logic is unchanged.
  */
 public class CastFinalCommand extends AbstractPlayerCommand {
     private final GridMoveManager playerManager;
@@ -55,7 +60,6 @@ public class CastFinalCommand extends AbstractPlayerCommand {
 
         GridPlayerState state = playerManager.getState(playerRef);
 
-        // Must have a spell prepared
         SpellCastingState castState = state.getSpellCastingState();
         if (castState == null || !castState.isValid()) {
             playerRef.sendMessage(Message.raw("[Griddify] No spell prepared! Use /Cast first").color("#FF0000"));
@@ -64,13 +68,9 @@ public class CastFinalCommand extends AbstractPlayerCommand {
 
         SpellData spell = castState.getSpell();
 
-        // --- Resolve target from aim position ---
-        // aimGridX/Z is updated by PlayerPositionTracker each time the player walks while casting.
-        // state.currentGridX/Z is the FROZEN NPC position — don't use that for aiming.
         int aimGridX = castState.getAimGridX();
         int aimGridZ = castState.getAimGridZ();
 
-        // Verify the aimed cell is within spell range of the FROZEN NPC
         int distanceFromCaster = SpellPatternCalculator.getDistance(
                 castState.getCasterGridX(), castState.getCasterGridZ(),
                 aimGridX, aimGridZ
@@ -82,35 +82,26 @@ public class CastFinalCommand extends AbstractPlayerCommand {
             return;
         }
 
-        // Commit: mark action used, calculate affected area.
-        // Do NOT unfreeze yet — we re-freeze with reason "post_cast" after resolving so the NPC
-        // stays at the cast position. PlayerPositionTracker auto-unfreezes when the player
-        // physically moves to a different grid cell.
-        state.hasUsedAction = true; // Consume action for this turn
+        state.hasUsedAction = true;
 
         int cost = spell.getSlotCost();
         if (!state.stats.consumeSpellSlot(cost)) {
             playerRef.sendMessage(Message.raw("[Griddify] Not enough spell slots!").color("#FF0000"));
             state.clearSpellCastingState();
             visualManager.clearSpellVisuals(playerRef.getUuid(), world);
+            visualManager.clearRangeOverlay(playerRef.getUuid(), world);
             return;
         }
 
         SpellPattern pattern = spell.getPattern();
 
-        // Calculate affected cells based on pattern type:
-        //   NPC-origin patterns (SELF, AURA, CONE, LINE, WALL): always fire from the frozen NPC cell.
-        //   Multi-target: fire on each confirmed target cell individually.
-        //   Targeted patterns (SINGLE_TARGET, SPHERE, CUBE, etc.): fire centred on the aimed cell.
         Set<SpellPatternCalculator.GridCell> affectedCells;
 
         if (spell.isMultiTarget() && !castState.getConfirmedTargets().isEmpty()) {
-            // Multi-target: affected cells = all confirmed target cells
             affectedCells = new HashSet<>();
             for (SpellCastingState.GridCell c : castState.getConfirmedTargets()) {
                 affectedCells.add(new SpellPatternCalculator.GridCell(c.x, c.z));
             }
-            // If player never typed /CastTarget at all, fall back to current aim cell
             if (affectedCells.isEmpty()) {
                 affectedCells.add(new SpellPatternCalculator.GridCell(aimGridX, aimGridZ));
             }
@@ -127,7 +118,6 @@ public class CastFinalCommand extends AbstractPlayerCommand {
                             spell.getRangeGrids(), spell.getAreaGrids());
                     break;
                 default:
-                    // SINGLE_TARGET, SPHERE, CUBE, CYLINDER, CHAIN
                     affectedCells = SpellPatternCalculator.calculatePattern(
                             pattern, castState.getDirection(),
                             aimGridX, aimGridZ,
@@ -136,7 +126,6 @@ public class CastFinalCommand extends AbstractPlayerCommand {
             }
         }
 
-        // Debug: log affected cells and monster positions so direction issues are visible
         StringBuilder dbg = new StringBuilder("[Griddify] [CASTFINAL] " + spell.getName()
                 + " dir=" + castState.getDirection().name()
                 + " caster=(" + castState.getCasterGridX() + "," + castState.getCasterGridZ() + ")"
@@ -149,7 +138,6 @@ public class CastFinalCommand extends AbstractPlayerCommand {
         dbg.append("]");
         System.out.println(dbg);
 
-        // --- Calculate roll amount (damage or healing) ---
         int rollAmount = 0;
         if (spell.getDamageDice() != null && !spell.getDamageDice().isEmpty()) {
             rollAmount = rollDamage(spell.getDamageDice());
@@ -159,15 +147,11 @@ public class CastFinalCommand extends AbstractPlayerCommand {
 
         boolean isHeal = spell.isHealingSpell();
         boolean casterIsGM = roleManager.isGM(playerRef);
-
-        // ── Collect GM PlayerRef for notifying on monster damage ─────────────
         PlayerRef gmRef = roleManager.getGM();
-
         int targetsAffected = 0;
 
         if (isHeal) {
             if (casterIsGM) {
-                // GM healing monsters
                 for (MonsterState monster : encounterManager.getMonsters()) {
                     if (!monster.isAlive()) continue;
                     if (affectedCells.contains(new SpellPatternCalculator.GridCell(monster.currentGridX, monster.currentGridZ))) {
@@ -176,7 +160,6 @@ public class CastFinalCommand extends AbstractPlayerCommand {
                             int before = monster.stats.currentHP;
                             monster.stats.heal(rollAmount);
                             int after = monster.stats.currentHP;
-                            // Notify GM
                             if (gmRef != null) {
                                 gmRef.sendMessage(Message.raw("[Griddify] [HEAL] " + monster.getDisplayName()
                                         + " healed " + (after - before) + " HP → "
@@ -186,7 +169,6 @@ public class CastFinalCommand extends AbstractPlayerCommand {
                     }
                 }
             } else {
-                // Player healing players
                 for (com.gridifymydungeon.plugin.gridmove.GridPlayerState ps : playerManager.getAllStates()) {
                     if (ps.npcEntity == null || !ps.npcEntity.isValid()) continue;
                     if (affectedCells.contains(new SpellPatternCalculator.GridCell(ps.currentGridX, ps.currentGridZ))) {
@@ -195,10 +177,8 @@ public class CastFinalCommand extends AbstractPlayerCommand {
                             int before = ps.stats.currentHP;
                             ps.stats.heal(rollAmount);
                             int after = ps.stats.currentHP;
-                            // Notify the healed player
                             ps.playerRef.sendMessage(Message.raw("[Griddify] [HEAL] Healed " + (after - before)
                                     + " HP  →  " + after + "/" + ps.stats.maxHP + " HP").color("#00FF7F"));
-                            // Also notify caster if different
                             if (!ps.playerRef.equals(playerRef)) {
                                 playerRef.sendMessage(Message.raw("[Griddify] [HEAL] " + ps.playerRef.getUsername()
                                         + ": " + after + "/" + ps.stats.maxHP + " HP").color("#00FF7F"));
@@ -208,8 +188,6 @@ public class CastFinalCommand extends AbstractPlayerCommand {
                 }
             }
         } else {
-            // ── DAMAGE ────────────────────────────────────────────────────────
-            // Damage from monsters (GM cast) hits players
             if (casterIsGM) {
                 for (com.gridifymydungeon.plugin.gridmove.GridPlayerState ps : playerManager.getAllStates()) {
                     if (ps.npcEntity == null || !ps.npcEntity.isValid()) continue;
@@ -219,7 +197,6 @@ public class CastFinalCommand extends AbstractPlayerCommand {
                         if (rollAmount > 0) {
                             ps.stats.takeDamage(rollAmount);
                             int remaining = ps.stats.currentHP;
-                            // Notify the hit player privately
                             if (ps.playerRef != null) {
                                 String hpBar = buildHPBar(remaining, ps.stats.maxHP);
                                 if (remaining == 0) {
@@ -237,7 +214,6 @@ public class CastFinalCommand extends AbstractPlayerCommand {
                                             .color("#FF6B6B"));
                                 }
                             }
-                            // Notify GM with per-player summary
                             if (gmRef != null) {
                                 String who = ps.playerRef != null ? ps.playerRef.getUsername() : "Player";
                                 String tag = remaining == 0 ? "[DEAD]" : "[HIT]";
@@ -250,7 +226,7 @@ public class CastFinalCommand extends AbstractPlayerCommand {
                     }
                 }
             } else {
-                // Player cast hits monsters
+                // ── Player casts at monsters ──────────────────────────────────
                 for (MonsterState monster : encounterManager.getMonsters()) {
                     if (!monster.isAlive()) continue;
                     if (affectedCells.contains(new SpellPatternCalculator.GridCell(monster.currentGridX, monster.currentGridZ))) {
@@ -261,13 +237,11 @@ public class CastFinalCommand extends AbstractPlayerCommand {
                             int after = monster.stats.currentHP;
                             boolean slain = (after == 0);
                             String tag = slain ? "[DEAD]" : "[HIT]";
-                            // Notify the attacking player
                             playerRef.sendMessage(Message.raw("[Griddify] " + tag + " " + monster.getDisplayName()
                                             + "  -" + rollAmount + " "
                                             + spell.getDamageType().name().toLowerCase()
                                             + "  →  " + after + "/" + monster.stats.maxHP + " HP")
                                     .color(slain ? "#FF0000" : "#FF6B6B"));
-                            // Notify GM
                             if (gmRef != null && !gmRef.equals(playerRef)) {
                                 String hpBar = buildHPBar(after, monster.stats.maxHP);
                                 gmRef.sendMessage(Message.raw("[Griddify] " + tag + " " + monster.getDisplayName()
@@ -275,7 +249,6 @@ public class CastFinalCommand extends AbstractPlayerCommand {
                                                 + after + "/" + monster.stats.maxHP + " HP  " + hpBar)
                                         .color(slain ? "#FF0000" : "#FFA500"));
                             }
-                            // Auto-delete monster on death
                             if (slain) {
                                 final MonsterState deadMonster = monster;
                                 final int deadNum = monster.monsterNumber;
@@ -292,47 +265,51 @@ public class CastFinalCommand extends AbstractPlayerCommand {
                         }
                     }
                 }
+
+                // ── ADDED: Fire_Bolt visual projectile ────────────────────────
+                // After damage is resolved, launch a fireball from the NPC position
+                // to the aimed grid cell as a visual effect. Only Fire_Bolt gets this;
+                // all other spells are unaffected.
+                if ("Fire_Bolt".equalsIgnoreCase(spell.getName())) {
+                    final SpellCastingState finalCastState = castState;
+                    final int finalAimX = aimGridX;
+                    final int finalAimZ = aimGridZ;
+                    final float npcY    = state.npcY;
+                    world.execute(() ->
+                            launchFireBoltProjectile(world, finalCastState, finalAimX, finalAimZ, npcY)
+                    );
+                }
             }
         }
 
         int totalDamage = isHeal ? 0 : rollAmount;
         int monstersHit = targetsAffected;
 
-        // Persistent spell handling
         if (spell.isPersistent()) {
             PersistentSpellEffect persistentEffect = new PersistentSpellEffect(
-                    spell, playerRef, affectedCells,
-                    0 // TODO: pass current turn from CombatManager
-            );
-            // TODO: persistentSpellManager.addEffect(persistentEffect);
+                    spell, playerRef, affectedCells, 0);
             playerRef.sendMessage(Message.raw("  Duration: " + spell.getDurationTurns() + " turns").color("#9370DB"));
         }
 
-        // Clear visuals and state
         visualManager.clearSpellVisuals(playerRef.getUuid(), world);
+        visualManager.clearRangeOverlay(playerRef.getUuid(), world);
         state.clearSpellCastingState();
 
         boolean casterIsGMControlling = casterIsGM && encounterManager.getControlledMonster() != null;
 
         if (casterIsGMControlling) {
-            // Keep the monster frozen at its cast position.
-            // GMPositionTracker will unfreeze it when the GM physically walks back to the monster's cell.
             MonsterState castMonster = encounterManager.getControlledMonster();
             castMonster.freeze("post_cast");
-            state.unfreeze(); // GM player state doesn't need to stay frozen
-            // Clear the blue monster BFS overlay that was shown during /cast
+            state.unfreeze();
             if (state.gridOverlayEnabled && !state.gmMapOverlayActive) {
                 world.execute(() -> com.gridifymydungeon.plugin.gridmove.GridOverlayManager.removeGridOverlay(world, state));
             }
             playerRef.sendMessage(Message.raw("[Griddify] Monster holds position — walk back to it to move it.").color("#87CEEB"));
         } else {
-            // Player: re-freeze NPC at the cast position so it doesn't teleport if the player
-            // walks around after casting. Auto-unfreezes when player moves to a new grid cell.
             state.freeze("post_cast");
             playerRef.sendMessage(Message.raw("[Griddify] NPC holds position — walk to a new cell to move it.").color("#87CEEB"));
         }
 
-        // --- Show world event title ---
         String effectText;
         if (isHeal) {
             effectText = rollAmount > 0 ? "+" + rollAmount + " HP healed" : spell.getDescription();
@@ -345,7 +322,6 @@ public class CastFinalCommand extends AbstractPlayerCommand {
         Message secondaryTitle = Message.raw(effectText).color("#FFD700");
         EventTitleUtil.showEventTitleToWorld(primaryTitle, secondaryTitle, true, null, 4.0f, 0.5f, 1.0f, store);
 
-        // --- Player notification ---
         String hitLabel = isHeal ? "target(s) healed" : "target(s) hit";
         Message primary = Message.raw("SPELL CAST!").color("#FFD700");
         Message secondary = Message.raw(spell.getName() + " → " + monstersHit + " " + hitLabel).color("#FFFFFF");
@@ -370,7 +346,65 @@ public class CastFinalCommand extends AbstractPlayerCommand {
                 spell.getName() + " for " + totalDamage + " damage (" + monstersHit + " targets)");
     }
 
+    // ── ADDED: Fire_Bolt projectile launcher ─────────────────────────────────
 
+    /**
+     * Launches a Fire_BoltProjectile from the caster's NPC world position to
+     * the centre of the aimed grid cell. Called only for Fire_Bolt.
+     *
+     * Grid → world conversion: worldX = gridX * 2 + 1, worldZ = gridZ * 2 + 1
+     *
+     * The projectile is purely visual — damage is already resolved above.
+     * On arrival, Explosion_Big is sent to all players, then the projectile despawns.
+     *
+     * MUST be called inside world.execute().
+     */
+    private void launchFireBoltProjectile(World world, SpellCastingState castState,
+                                          int aimGridX, int aimGridZ, float npcY) {
+        // Caster origin: centre of NPC's frozen grid cell, at NPC chest height
+        float originX = (castState.getCasterGridX() * 2.0f) + 1.0f;
+        float originY = npcY + 1.2f; // chest height — slightly above ground level
+        float originZ = (castState.getCasterGridZ() * 2.0f) + 1.0f;
+
+        // Target: centre of aimed grid cell, scanning for actual terrain height.
+        // Uses same direct world.getBlockType() scan as GridOverlayManager — scan from
+        // npcY+30 downward 45 blocks so both uphill and downhill terrain is found.
+        float targetX = (aimGridX * 2.0f) + 1.0f;
+        float targetZ = (aimGridZ * 2.0f) + 1.0f;
+        Float scannedGroundY = SpellVisualManager.scanForGround(world, aimGridX, aimGridZ, npcY + 30.0f, 45);
+        float targetY = (scannedGroundY != null ? scannedGroundY : npcY) + 1.2f;
+
+        float dx = targetX - originX;
+        float dy = targetY - originY;
+        float dz = targetZ - originZ;
+        float len = (float) Math.sqrt(dx * dx + dy * dy + dz * dz);
+
+        if (len < 0.0001f) {
+            System.out.println("[Griddify] [FIRE_BOLT] Caster and target are the same cell — skipping projectile.");
+            return;
+        }
+
+        Vector3f direction = new Vector3f(dx / len, dy / len, dz / len);
+
+        // Yaw/pitch for initial model rotation so texture faces travel direction
+        // Negate yaw: Hytale rotation is clockwise-positive, atan2 gives counterclockwise.
+        // S/N are unaffected (0 and ±π are symmetric), but E/W need the sign flip.
+        float yaw   = -(float) Math.atan2(dx, -dz);
+        float pitch = (float) Math.asin(-dy / len);
+
+        Vector3d origin = new Vector3d(originX, originY, originZ);
+        // Pass targetPos so Fire_BoltProjectile's arrival check fires correctly.
+        Vector3d targetPos = new Vector3d(targetX, targetY, targetZ);
+
+        System.out.println("[Griddify] [FIRE_BOLT] Launching projectile from ("
+                + originX + "," + originY + "," + originZ + ") → aim=("
+                + aimGridX + "," + aimGridZ + ") dist=" + String.format("%.1f", len / 2.0f) + " grids");
+
+        FireboltProjectile.launch(world, origin, direction, yaw, pitch, targetPos,
+                playerManager.getAllPlayerRefs());
+    }
+
+    // ── Existing helpers (unchanged) ─────────────────────────────────────────
 
     private int rollDamage(String damageDice) {
         try {
@@ -388,7 +422,6 @@ public class CastFinalCommand extends AbstractPlayerCommand {
         }
     }
 
-    /** ASCII health bar: [##########..........] (10 segments) */
     private static String buildHPBar(int current, int max) {
         if (max <= 0) return "";
         int filled = (int) Math.round(10.0 * current / max);

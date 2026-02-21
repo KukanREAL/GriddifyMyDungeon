@@ -5,6 +5,7 @@ import com.gridifymydungeon.plugin.dnd.commands.*;
 import com.gridifymydungeon.plugin.gridmove.commands.*;
 import com.gridifymydungeon.plugin.gridmove.packet.*;
 import com.gridifymydungeon.plugin.spell.*;
+import com.gridifymydungeon.plugin.spell.SpellVisualManager;
 import com.hypixel.hytale.event.EventPriority;
 import com.hypixel.hytale.event.EventRegistration;
 import com.hypixel.hytale.protocol.packets.player.ClientMovement;
@@ -127,13 +128,19 @@ public class GridMovePlugin extends JavaPlugin {
         getCommandRegistry().registerCommand(new GridNullCommand(roleManager));
         getCommandRegistry().registerCommand(new GridRestartCommand(roleManager));
 
-        // Combat command declared early so EndTurnCommand can reference it
+        // Declared early — both needed before EndTurnCommand
         CombatCommand combatCommand = new CombatCommand(roleManager, combatManager, gridMoveManager);
+        SpellVisualManager spellVisualManager = new SpellVisualManager(gridMoveManager);
+        positionTracker.setSpellVisualManager(spellVisualManager);
+        gmPositionTracker.setSpellVisualManager(spellVisualManager);
 
         // Player commands
         getCommandRegistry().registerCommand(new GridMoveCommand(gridMoveManager, collisionDetector, roleManager));
         getCommandRegistry().registerCommand(new MaxTurnsCommand(gridMoveManager));
-        getCommandRegistry().registerCommand(new EndTurnCommand(gridMoveManager, combatManager, combatCommand, collisionDetector));
+        getCommandRegistry().registerCommand(new EndTurnCommand(
+                gridMoveManager, combatManager, combatCommand, collisionDetector,
+                encounterManager, spellVisualManager
+        ));
         getCommandRegistry().registerCommand(new GridCamCommand());
         getCommandRegistry().registerCommand(new ClearHologramsCommand(gridMoveManager));
         getCommandRegistry().registerCommand(new GridOnCommand(gridMoveManager, collisionDetector, encounterManager, roleManager));
@@ -172,25 +179,20 @@ public class GridMovePlugin extends JavaPlugin {
         getCommandRegistry().registerCommand(combatCommand);
         getCommandRegistry().registerCommand(new CriticalCommand(roleManager, combatSettings));
 
-        // Preset commands - FIXED: GridPresetsCommand renamed to GridClassesCommand
+        // Preset commands
         getCommandRegistry().registerCommand(new GridClassesCommand());
 
-        // Level commands - FIXED: Removed extra arguments
+        // Level commands
         getCommandRegistry().registerCommand(new LevelUpCommand(gridMoveManager, roleManager));
         getCommandRegistry().registerCommand(new LevelDownCommand(gridMoveManager, roleManager));
 
-        // Class selection commands - FIXED: Removed extra arguments
+        // Class selection commands
         getCommandRegistry().registerCommand(new GridClassCommand(gridMoveManager, roleManager, encounterManager));
         getCommandRegistry().registerCommand(new GridSubclassCommand(gridMoveManager));
         getCommandRegistry().registerCommand(new com.gridifymydungeon.plugin.dnd.commands.GridSubclassesCommand(gridMoveManager));
 
-        // FIXED: SpellVisualManager now receives world at call time (not at init), avoiding null world on startup
-        SpellVisualManager spellVisualManager = new SpellVisualManager(gridMoveManager);
-        positionTracker.setSpellVisualManager(spellVisualManager);
-        gmPositionTracker.setSpellVisualManager(spellVisualManager);
+        // Spell casting commands
         PersistentSpellManager persistentSpellManager = new PersistentSpellManager();
-
-        // Spell casting commands - FIXED: Removed extra arguments
         getCommandRegistry().registerCommand(new ListSpellsCommand(gridMoveManager, roleManager, encounterManager));
         getCommandRegistry().registerCommand(new CastCommand(gridMoveManager, encounterManager, spellVisualManager, roleManager, collisionDetector));
         getCommandRegistry().registerCommand(new CastTargetCommand(gridMoveManager, spellVisualManager));
@@ -199,9 +201,6 @@ public class GridMovePlugin extends JavaPlugin {
 
         // Help command
         getCommandRegistry().registerCommand(new GridHelpCommand(roleManager));
-
-        // Dev/test commands
-        getCommandRegistry().registerCommand(new com.gridifymydungeon.plugin.spell.Command.TestFireballCommand());
 
         getLogger().at(Level.INFO).log("Registered all commands successfully!");
     }

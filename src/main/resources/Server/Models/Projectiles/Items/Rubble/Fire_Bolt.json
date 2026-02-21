@@ -1,0 +1,25 @@
+{
+  "Model": "Items/Fire_Bolt.blockymodel",
+  "Texture": "Items/Fire_Bolt.png",
+  "HitBox": {
+    "Max": {
+      "X": 0.15,
+      "Y": 0.15,
+      "Z": 0.15
+    },
+    "Min": {
+      "X": -0.15,
+      "Y": -0.15,
+      "Z": -0.15
+    }
+  },
+  "MinScale": 1,
+  "MaxScale": 1,
+  "Trails": [
+    {
+      "TrailId": {
+        "Parent": "Fire_Trap_Fire"
+      }
+    }
+  ]
+}

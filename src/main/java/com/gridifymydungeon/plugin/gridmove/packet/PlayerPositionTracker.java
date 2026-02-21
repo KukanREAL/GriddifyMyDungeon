@@ -23,6 +23,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * Tracks player position changes and handles grid movement
  * FIXED: Movement only costs moves during combat. Outside combat, free movement
  *        but /gridon still shows max range (uses maxMoves since remainingMoves stays full).
+ * FIXED: Out-of-range spell cancel no longer teleports the NPC to the player.
  */
 public class PlayerPositionTracker {
 
@@ -80,13 +81,17 @@ public class PlayerPositionTracker {
         boolean isCasting = state.getSpellCastingState() != null && state.getSpellCastingState().isValid();
 
         // If a cast state exists but has EXPIRED, clean up visuals and state now.
-        // (CastFinalCommand checks isValid() and clears state, but never clears the red overlay.)
         if (state.getSpellCastingState() != null && !state.getSpellCastingState().isValid()) {
             state.clearSpellCastingState();
             state.unfreeze();
-            world.execute(() -> spellVisualManager.clearSpellVisuals(playerRef.getUuid(), world));
+            world.execute(() -> {
+                spellVisualManager.clearSpellVisuals(playerRef.getUuid(), world);
+                spellVisualManager.clearRangeOverlay(playerRef.getUuid(), world);
+            });
             playerRef.sendMessage(com.hypixel.hytale.server.core.Message.raw(
                     "[Griddify] Spell casting timed out — cancelled.").color("#FF6347"));
+            // isCasting is now false; fall through to normal movement below
+            isCasting = false;
         }
 
         if (!isCasting && state.isFrozen) {
@@ -125,10 +130,19 @@ public class PlayerPositionTracker {
                     int range = castState.getSpell().getRangeGrids();
                     if (range > 0 && dist > range) {
                         state.clearSpellCastingState();
-                        state.unfreeze();
-                        world.execute(() -> spellVisualManager.clearSpellVisuals(playerRef.getUuid(), world));
+                        // Keep the NPC frozen at its current cell — do NOT unfreeze.
+                        // Re-freeze with "post_cast" so the player must walk back to the
+                        // NPC's cell before it can move again. If we called unfreeze() here,
+                        // the very next position packet would treat it as a free move and
+                        // teleport the NPC to the player's out-of-range location.
+                        state.freeze("post_cast");
+                        world.execute(() -> {
+                            spellVisualManager.clearSpellVisuals(playerRef.getUuid(), world);
+                            spellVisualManager.clearRangeOverlay(playerRef.getUuid(), world);
+                        });
                         playerRef.sendMessage(com.hypixel.hytale.server.core.Message.raw(
-                                "[Griddify] Out of range - spell cancelled!").color("#FF0000"));
+                                "[Griddify] Out of range - spell cancelled! Return to your NPC to continue.").color("#FF0000"));
+                        return;
                     }
                 }
 
@@ -242,7 +256,6 @@ public class PlayerPositionTracker {
         double moveCost = calculateMoveCost(state.currentGridX, state.currentGridZ, newGridX, newGridZ);
 
         // FIXED: Only consume moves during combat. Outside combat = free movement.
-        // /gridon still works: remainingMoves stays at maxMoves when nothing consumes them.
         boolean inCombat = combatManager.isCombatActive();
 
         if (inCombat && state.hasMaxMovesSet()) {

@@ -34,6 +34,9 @@ import java.util.Set;
  *   SINGLE_TARGET       - NPC freezes. Red cell follows player body as aim. /CastFinal fires.
  *
  *   SPHERE / CUBE / etc - NPC freezes. Full area preview centred on player body. /CastFinal fires.
+ *
+ * Range overlay: Grid_Range tiles are spawned at /cast to show the spell's reach.
+ * They are cleared at /castfinal or /castcancel.
  */
 public class CastCommand extends AbstractPlayerCommand {
     private final GridMoveManager playerManager;
@@ -140,6 +143,17 @@ public class CastCommand extends AbstractPlayerCommand {
         Direction8 initialDirection = Direction8.fromYaw(yaw);
 
         float playerY = casterY; // Use NPC/monster ground Y as reference, not raw body height
+
+        // ── Range overlay: show how far the spell reaches (Grid_Range tiles) ──────────
+        // Shown for all patterns that have a non-zero range. SELF/AURA with range 0
+        // are skipped inside showRangeOverlay automatically.
+        final int fCasterGridX = casterGridX, fCasterGridZ = casterGridZ;
+        final int fRange = spell.getRangeGrids();
+        final float fCasterY = casterY;
+        world.execute(() ->
+                visualManager.showRangeOverlay(
+                        playerRef.getUuid(), fCasterGridX, fCasterGridZ, fRange, world, fCasterY)
+        );
 
         // -----------------------------------------------------------------------
         // SELF / AURA: instant, no freeze
@@ -252,12 +266,9 @@ public class CastCommand extends AbstractPlayerCommand {
         if (spell.getClassType() == null) return spell.getName() + " (Monster Attack)";
         return spell.getName() + " (" + spell.getClassType().getDisplayName() + ")";
     }
-    private float getPlayerY(PlayerRef playerRef) {
-        try { return (float) playerRef.getTransform().getPosition().getY(); } catch (Exception e) { return 0f; }
-    }
+
     private boolean canAccessSpell(GridPlayerState state, SpellData spell, PlayerRef playerRef) {
         // ── Monster-type-locked attack ────────────────────────────────────────
-        // Only usable when the GM controls a monster of the exact required type.
         if (spell.isMonsterAttack()) {
             if (!roleManager.isGM(playerRef)) return false;
             com.gridifymydungeon.plugin.dnd.MonsterState controlled = encounterManager.getControlledMonster();
@@ -266,7 +277,6 @@ public class CastCommand extends AbstractPlayerCommand {
         }
 
         // ── Old generic monster attacks (classType == null, not locked) ───────
-        // Kept for backwards-compat; in practice no longer registered this way.
         if (spell.getClassType() == null && !spell.isSubclassSpell()) {
             return roleManager.isGM(playerRef) && encounterManager.getControlledMonster() != null;
         }

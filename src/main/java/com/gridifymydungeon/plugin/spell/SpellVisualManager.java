@@ -1,6 +1,5 @@
 package com.gridifymydungeon.plugin.spell;
 
-import com.gridifymydungeon.plugin.dnd.commands.MonsterEntityController;
 import com.gridifymydungeon.plugin.gridmove.GridMoveManager;
 import com.gridifymydungeon.plugin.gridmove.GridPlayerState;
 import com.hypixel.hytale.component.AddReason;
@@ -12,6 +11,8 @@ import com.hypixel.hytale.math.util.ChunkUtil;
 import com.hypixel.hytale.math.vector.Vector3d;
 import com.hypixel.hytale.math.vector.Vector3f;
 import com.hypixel.hytale.math.vector.Vector3i;
+import com.hypixel.hytale.protocol.BlockMaterial;
+import com.hypixel.hytale.server.core.asset.type.blocktype.config.BlockType;
 import com.hypixel.hytale.server.core.asset.type.model.config.Model;
 import com.hypixel.hytale.server.core.asset.type.model.config.ModelAsset;
 import com.hypixel.hytale.server.core.entity.UUIDComponent;
@@ -25,32 +26,32 @@ import com.hypixel.hytale.server.core.universe.world.chunk.section.ChunkSection;
 import com.hypixel.hytale.server.core.universe.world.chunk.section.FluidSection;
 import com.hypixel.hytale.server.core.universe.world.storage.ChunkStore;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
-import com.hypixel.hytale.protocol.BlockMaterial;
-import com.hypixel.hytale.server.core.asset.type.blocktype.config.BlockType;
 
 import java.util.*;
 
 /**
  * Manages spell range/area visualization using Grid_Spell entities (red).
  *
- * Y-placement rules:
- *  - Ground found  → spawn at groundY + 0.2
- *  - Fluid present → spawn on TOP of fluid (fluidTopY + 0.2) — spells hit fluid surfaces
- *  - Pure air      → SKIP (no grid on air cells)
- *
- * All grids use the NPC's stored npcY as the reference height, never the player body Y.
+ * Ground scanning now uses the same direct world.getBlockType() approach as
+ * GridOverlayManager — scanning from referenceY+30 downward to handle terrain
+ * up to 30 blocks above or below the caster correctly.
  */
 public class SpellVisualManager {
 
     private final GridMoveManager gridManager;
-
     private final Map<UUID, List<Ref<EntityStore>>> playerSpellVisuals = new HashMap<>();
 
     private static final String SPELL_MODEL_ID    = "Grid_Spell";
     private static final String FALLBACK_MODEL_ID = "Grid_Basic";
+    private static final String RANGE_MODEL_ID    = "Grid_Range";
 
     private static Model cachedSpellModel     = null;
+    private static Model cachedRangeModel     = null;
     private static boolean modelLoadAttempted = false;
+    private static boolean rangeModelAttempted = false;
+
+    // Per-player range overlay tiles (separate from the aim overlay)
+    private final Map<UUID, List<Ref<EntityStore>>> playerRangeVisuals = new HashMap<>();
 
     public SpellVisualManager(GridMoveManager gridManager) {
         this.gridManager = gridManager;
@@ -60,10 +61,6 @@ public class SpellVisualManager {
     // PUBLIC API
     // ========================================================
 
-    /**
-     * Show spell area in red.
-     * Uses npcY (NPC ground height) as reference — never raw playerY body height.
-     */
     public void showSpellArea(UUID playerUUID, Set<SpellPatternCalculator.GridCell> cells,
                               World world, float playerY) {
         clearSpellVisuals(playerUUID, world);
@@ -74,7 +71,6 @@ public class SpellVisualManager {
             return;
         }
 
-        // Use NPC's stored ground Y as reference — ignore raw body Y which is above ground
         float referenceY = resolveNpcY(playerUUID, playerY);
 
         List<Ref<EntityStore>> newVisuals = new ArrayList<>();
@@ -84,22 +80,20 @@ public class SpellVisualManager {
             float cx = (cell.x * 2.0f) + 1.0f;
             float cz = (cell.z * 2.0f) + 1.0f;
 
-            // scanForGroundPublic scans from (ref - MIN_OFFSET=3) downward.
-            // referenceY is npcY which is already AT ground, so we pass referenceY + 3
-            // to make the scan start just above ground and sweep down to find the surface.
-            Float groundY = MonsterEntityController.scanForGroundPublic(world, cell.x, cell.z, referenceY + 3.0f);
-
-            // Fallback: use referenceY directly (flat terrain, stairs, etc.)
+            // Use the same scanForGround approach as GridOverlayManager:
+            // start 30 blocks ABOVE referenceY and scan down 45 blocks total,
+            // so both uphill and downhill cells are found correctly.
+            Float groundY = scanForGround(world, cell.x, cell.z, referenceY + 30.0f, 45);
             if (groundY == null) groundY = referenceY;
 
-            float y = groundY + 0.03f; // Grid_Spell: +0.03 Y offset
+            float y = groundY + 0.03f;
             Ref<EntityStore> ref = spawnTile(store, model, cx, y, cz);
             if (ref != null) newVisuals.add(ref);
         }
 
         playerSpellVisuals.put(playerUUID, newVisuals);
         System.out.println("[Griddify] [SPELL] Spell overlay: " + cells.size() +
-                " cells → " + newVisuals.size() + " placed (skipped air/out-of-range)");
+                " cells → " + newVisuals.size() + " placed");
     }
 
     public void clearSpellVisuals(UUID playerUUID, World world) {
@@ -118,15 +112,111 @@ public class SpellVisualManager {
         for (UUID id : new HashSet<>(playerSpellVisuals.keySet())) clearSpellVisuals(id, world);
     }
 
+    /**
+     * Shows a ring of Grid_Range tiles covering every cell within the spell's
+     * range from the caster's grid position. Called on /cast so the player can
+     * see exactly how far the spell reaches before aiming.
+     * SELF/AURA spells with range 0 skip the overlay (they fire on the caster).
+     */
+    public void showRangeOverlay(UUID playerUUID, int casterGridX, int casterGridZ,
+                                 int rangeGrids, World world, float npcY) {
+        clearRangeOverlay(playerUUID, world);
+        if (rangeGrids <= 0) return;
+
+        Model model = getRangeModel();
+        if (model == null) {
+            System.err.println("[Griddify] [RANGE] Failed to load Grid_Range model!");
+            return;
+        }
+
+        float referenceY = resolveNpcY(playerUUID, npcY);
+        List<Ref<EntityStore>> tiles = new ArrayList<>();
+        Store<EntityStore> store = world.getEntityStore().getStore();
+
+        // All cells with Euclidean distance <= rangeGrids from caster
+        for (int dx = -rangeGrids; dx <= rangeGrids; dx++) {
+            for (int dz = -rangeGrids; dz <= rangeGrids; dz++) {
+                double dist = Math.sqrt(dx * dx + dz * dz);
+                if (dist > rangeGrids) continue;
+
+                int cellX = casterGridX + dx;
+                int cellZ = casterGridZ + dz;
+
+                float wx = (cellX * 2.0f) + 1.0f;
+                float wz = (cellZ * 2.0f) + 1.0f;
+
+                Float groundY = scanForGround(world, cellX, cellZ, referenceY + 30.0f, 45);
+                if (groundY == null) groundY = referenceY;
+
+                Ref<EntityStore> ref = spawnTile(store, model, wx, groundY + 0.02f, wz);
+                if (ref != null) tiles.add(ref);
+            }
+        }
+
+        playerRangeVisuals.put(playerUUID, tiles);
+        System.out.println("[Griddify] [RANGE] Range overlay: range=" + rangeGrids
+                + " cells=" + tiles.size() + " for " + playerUUID);
+    }
+
+    public void clearRangeOverlay(UUID playerUUID, World world) {
+        List<Ref<EntityStore>> tiles = playerRangeVisuals.remove(playerUUID);
+        if (tiles == null) return;
+        Store<EntityStore> store = world.getEntityStore().getStore();
+        for (Ref<EntityStore> ref : tiles) {
+            if (ref != null && ref.isValid()) {
+                try { store.removeEntity(ref, RemoveReason.REMOVE); } catch (Exception ignored) {}
+            }
+        }
+        tiles.clear();
+    }
+
+    public void clearAllRangeOverlays(World world) {
+        for (UUID id : new HashSet<>(playerRangeVisuals.keySet())) clearRangeOverlay(id, world);
+    }
+
     // ========================================================
-    // Y REFERENCE — always use NPC ground Y, not player body Y
+    // GROUND SCANNING — identical logic to GridOverlayManager
     // ========================================================
 
     /**
-     * Resolve the reference Y for ground scanning.
-     * Prefers the NPC's stored npcY (ground-snapped) over raw player body Y.
-     * Raw player body Y is above ground (eye-level), causing grids to spawn too high.
+     * Scans downward from referenceY for the first solid non-barrier block.
+     * Returns groundY = blockY + 1.0f (top surface of that block).
+     * Identical to GridOverlayManager.scanForGround — this is what actually works.
      */
+    public static Float scanForGround(World world, int gridX, int gridZ, float referenceY, int scanDepth) {
+        int startY = (int) Math.floor(referenceY);
+        int endY   = startY - scanDepth;
+        for (int blockY = startY; blockY >= endY; blockY--) {
+            boolean hasGround = false;
+            for (int xOff = 0; xOff < 2; xOff++) {
+                for (int zOff = 0; zOff < 2; zOff++) {
+                    BlockType block = world.getBlockType(
+                            new Vector3i((gridX * 2) + xOff, blockY, (gridZ * 2) + zOff));
+                    if (isSolid(block) && !isBarrier(block)) {
+                        hasGround = true;
+                    }
+                }
+            }
+            if (hasGround) {
+                return blockY + 1.0f;
+            }
+        }
+        return null;
+    }
+
+    private static boolean isSolid(BlockType block) {
+        return block != null && block.getMaterial() == BlockMaterial.Solid;
+    }
+
+    private static boolean isBarrier(BlockType block) {
+        return block != null && block.getId() != null &&
+                block.getId().toLowerCase().contains("barrier");
+    }
+
+    // ========================================================
+    // Y REFERENCE
+    // ========================================================
+
     private float resolveNpcY(UUID playerUUID, float fallbackY) {
         for (Map.Entry<UUID, GridPlayerState> e : gridManager.getStateEntries()) {
             if (e.getKey().equals(playerUUID)) {
@@ -135,43 +225,29 @@ public class SpellVisualManager {
                 break;
             }
         }
-        // Last resort: step down from body Y since body Y is roughly 1.8 blocks above feet
         return fallbackY - 1.8f;
     }
 
     // ========================================================
-    // FLUID SURFACE DETECTION
+    // FLUID DETECTION
     // ========================================================
 
-    /**
-     * Find the top Y of a fluid body at this grid cell, scanning downward from referenceY.
-     * Returns the Y coordinate where the fluid surface is (for placing the grid on top).
-     */
-    private static Float findFluidSurfaceY(World world, int gridX, int gridZ, float referenceY) {
+    private static boolean hasFluidAbove(World world, int gridX, int gridZ, float groundY) {
         try {
-            Store<ChunkStore> chunkStore = world.getChunkStore().getStore();
-            int startY = (int) Math.floor(referenceY - 3);
-            int endY   = (int) Math.floor(referenceY - 15);
-
-            for (int checkY = startY; checkY >= endY; checkY--) {
-                boolean hasFluid = false;
-                for (int xOff = 0; xOff < 2 && !hasFluid; xOff++) {
-                    for (int zOff = 0; zOff < 2 && !hasFluid; zOff++) {
-                        int bx = (gridX * 2) + xOff;
-                        int bz = (gridZ * 2) + zOff;
-                        FluidSection fs = findFluidSection(world, chunkStore, bx, checkY, bz);
-                        if (fs != null && fs.getFluidId(bx, checkY, bz) != 0) {
-                            hasFluid = true;
-                        }
+            Store<ChunkStore> cs = world.getChunkStore().getStore();
+            int startY = (int) Math.floor(groundY);
+            int endY   = (int) Math.floor(groundY + 2.0f);
+            for (int y = startY; y <= endY; y++) {
+                for (int xOff = 0; xOff < 2; xOff++) {
+                    for (int zOff = 0; zOff < 2; zOff++) {
+                        int bx = (gridX * 2) + xOff, bz = (gridZ * 2) + zOff;
+                        FluidSection fluid = findFluidSection(world, cs, bx, y, bz);
+                        if (fluid != null && fluid.getFluidId(bx, y, bz) != 0) return true;
                     }
-                }
-                if (hasFluid) {
-                    // Return top of this fluid layer
-                    return (float) checkY + 1.0f;
                 }
             }
         } catch (Exception ignored) {}
-        return null;
+        return false;
     }
 
     private static FluidSection findFluidSection(World world, Store<ChunkStore> store,
@@ -226,6 +302,15 @@ public class SpellVisualManager {
         cachedSpellModel = loadModel(SPELL_MODEL_ID);
         if (cachedSpellModel == null) cachedSpellModel = loadModel(FALLBACK_MODEL_ID);
         return cachedSpellModel;
+    }
+
+    private static Model getRangeModel() {
+        if (cachedRangeModel != null) return cachedRangeModel;
+        if (rangeModelAttempted) return null;
+        rangeModelAttempted = true;
+        cachedRangeModel = loadModel(RANGE_MODEL_ID);
+        if (cachedRangeModel == null) cachedRangeModel = loadModel(FALLBACK_MODEL_ID);
+        return cachedRangeModel;
     }
 
     private static Model loadModel(String id) {
