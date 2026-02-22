@@ -1,0 +1,44 @@
+{
+  "Model": "Items/Thunderwave.blockymodel",
+  "Texture": "Items/Thunderwave.png",
+  "HitBox": {
+    "Max": {
+      "X": 0.15,
+      "Y": 0.15,
+      "Z": 0.15
+    },
+    "Min": {
+      "X": -0.15,
+      "Y": -0.15,
+      "Z": -0.15
+    }
+  },
+  "MinScale": 1,
+  "MaxScale": 1,
+  "Particles": [
+    {
+      "SystemId": "Beam_Lightning2",
+      "RotationOffset": {
+        "Yaw": 90,
+        "Pitch": 90
+      },
+      "PositionOffset": {
+        "Z": -2,
+        "X": 0.1
+      },
+      "Scale": 0.3
+    },
+    {
+      "SystemId": "Beam_Lightning2",
+      "RotationOffset": {
+        "Yaw": 90,
+        "Pitch": -90
+      },
+      "PositionOffset": {
+        "Z": -2,
+        "X": -0.1
+      },
+      "Scale": 0.3
+    }
+  ]
+}

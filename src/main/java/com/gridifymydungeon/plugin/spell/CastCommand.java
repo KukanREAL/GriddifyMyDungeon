@@ -210,7 +210,8 @@ public class CastCommand extends AbstractPlayerCommand {
             playerRef.sendMessage(Message.raw("[Griddify] Multi-target! Walk to each target and type /CastTarget to confirm it.").color("#87CEEB"));
             playerRef.sendMessage(Message.raw("[Griddify] Targets: 0/" + spell.getMaxTargets() + " | Range: " + spell.getRangeGrids() + " grids").color("#87CEEB"));
         } else {
-            playerRef.sendMessage(Message.raw("[Griddify] Range: " + spell.getRangeGrids() + " grids | Walk to aim").color("#87CEEB"));
+            playerRef.sendMessage(Message.raw("[Griddify] Walk to aim cell, then /CastFinal to fire.").color("#87CEEB"));
+            playerRef.sendMessage(Message.raw("[Griddify] Or: walk anywhere, /CastTarget to lock aim from afar, then /CastFinal.").color("#87CEEB"));
         }
 
         if (spell.getDamageDice() != null) {

@@ -34,6 +34,17 @@ public class SpellCastingState {
     // Multi-target: list of confirmed target cells (player walks to each and confirms with a key/move)
     private final java.util.List<GridCell> confirmedTargets = new java.util.ArrayList<>();
 
+    /**
+     * Full confirmed pattern cells — set by /CastTarget for ALL spell patterns.
+     * Uses SpellPatternCalculator.GridCell directly (same type that computeOverlay produces)
+     * so no conversion is needed in CastTargetCommand or CastFinalCommand.
+     * Null means the player has not used /CastTarget yet (aim follows body position).
+     */
+    private java.util.Set<SpellPatternCalculator.GridCell> confirmedCells = null;
+
+    // Out-of-range tracking: warn once, don't cancel; block /CastTarget and /CastFinal
+    private boolean currentlyOutOfRange = false;
+
     public static class GridCell {
         public final int x, z;
         public GridCell(int x, int z) { this.x = x; this.z = z; }
@@ -117,6 +128,38 @@ public class SpellCastingState {
     public java.util.List<GridCell> getConfirmedTargets() { return confirmedTargets; }
     public int getConfirmedTargetCount() { return confirmedTargets.size(); }
     public boolean hasAllTargets() { return confirmedTargets.size() >= spell.getMaxTargets(); }
+
+    // ── Confirmed pattern cells (set by /CastTarget) ─────────────────────────
+
+    /**
+     * Lock in the full pattern snapshot from /CastTarget.
+     * Takes SpellPatternCalculator.GridCell directly — no conversion needed.
+     * Also records the aim point in confirmedTargets for range validation.
+     */
+    public void setConfirmedCells(java.util.Set<SpellPatternCalculator.GridCell> cells, int aimX, int aimZ) {
+        this.confirmedCells = new java.util.HashSet<>(cells);
+        confirmedTargets.clear();
+        confirmedTargets.add(new GridCell(aimX, aimZ));
+    }
+
+    /** Returns the confirmed pattern cells as SpellPatternCalculator.GridCell, or null if not yet confirmed. */
+    public java.util.Set<SpellPatternCalculator.GridCell> getConfirmedCells() { return confirmedCells; }
+
+    public boolean hasConfirmedCells() { return confirmedCells != null && !confirmedCells.isEmpty(); }
+
+    // ── Out-of-range tracking ─────────────────────────────────────────────────
+
+    /**
+     * Called by PlayerPositionTracker each time the player moves.
+     * Returns true if this is a NEW out-of-range transition (warning should be sent once).
+     */
+    public boolean setOutOfRange(boolean outOfRange) {
+        boolean wasOut = currentlyOutOfRange;
+        currentlyOutOfRange = outOfRange;
+        return outOfRange && !wasOut; // true = newly out of range
+    }
+
+    public boolean isOutOfRange() { return currentlyOutOfRange; }
 
     /** Cast state expires after 60 seconds */
     public boolean isValid() {

@@ -9,7 +9,6 @@ import com.gridifymydungeon.plugin.gridmove.GridPlayerState;
 import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.component.Store;
 import com.hypixel.hytale.math.vector.Vector3d;
-import com.hypixel.hytale.math.vector.Vector3f;
 import com.hypixel.hytale.protocol.ItemWithAllMetadata;
 import com.hypixel.hytale.protocol.packets.interface_.NotificationStyle;
 import com.hypixel.hytale.server.core.Message;
@@ -23,6 +22,7 @@ import com.hypixel.hytale.server.core.util.EventTitleUtil;
 import com.hypixel.hytale.server.core.util.NotificationUtil;
 
 import javax.annotation.Nonnull;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -71,14 +71,41 @@ public class CastFinalCommand extends AbstractPlayerCommand {
         int aimGridX = castState.getAimGridX();
         int aimGridZ = castState.getAimGridZ();
 
-        int distanceFromCaster = SpellPatternCalculator.getDistance(
-                castState.getCasterGridX(), castState.getCasterGridZ(),
-                aimGridX, aimGridZ
-        );
+        // ── Range check ──────────────────────────────────────────────────────
+        // If /CastTarget was used, validate against the CONFIRMED aim point, not the
+        // player's current body position (which may have drifted after confirmation).
+        // If no /CastTarget, validate against current body position as before.
+        if (spell.getRangeGrids() > 0) {
+            int checkX, checkZ;
+            if (castState.hasConfirmedCells() && !castState.getConfirmedTargets().isEmpty()) {
+                SpellCastingState.GridCell first = castState.getConfirmedTargets().get(0);
+                checkX = first.x;
+                checkZ = first.z;
+            } else {
+                checkX = aimGridX;
+                checkZ = aimGridZ;
+            }
+            // For CONE/LINE/WALL the range check doesn't apply (direction-based, range=0 in DB)
+            SpellPattern patternCheck = spell.getPattern();
+            boolean isDirectional = patternCheck == SpellPattern.CONE
+                    || patternCheck == SpellPattern.LINE
+                    || patternCheck == SpellPattern.WALL
+                    || patternCheck == SpellPattern.SELF
+                    || patternCheck == SpellPattern.AURA;
+            if (!isDirectional) {
+                int dist = SpellPatternCalculator.getDistance(
+                        castState.getCasterGridX(), castState.getCasterGridZ(), checkX, checkZ);
+                if (dist > spell.getRangeGrids()) {
+                    playerRef.sendMessage(Message.raw("[Griddify] Out of range! ("
+                            + dist + "/" + spell.getRangeGrids() + " grids)").color("#FF0000"));
+                    return;
+                }
+            }
+        }
 
-        if (distanceFromCaster > spell.getRangeGrids() && spell.getRangeGrids() > 0) {
-            playerRef.sendMessage(Message.raw("[Griddify] Out of range! Aimed " + distanceFromCaster +
-                    " grids, max is " + spell.getRangeGrids() + ". Walk body closer to the target.").color("#FF0000"));
+        // Also honour the live out-of-range flag (set when player walked out without confirming)
+        if (castState.isOutOfRange()) {
+            playerRef.sendMessage(Message.raw("[Griddify] Out of range — return to range or use /CastTarget first.").color("#FF0000"));
             return;
         }
 
@@ -97,15 +124,11 @@ public class CastFinalCommand extends AbstractPlayerCommand {
 
         Set<SpellPatternCalculator.GridCell> affectedCells;
 
-        if (spell.isMultiTarget() && !castState.getConfirmedTargets().isEmpty()) {
-            affectedCells = new HashSet<>();
-            for (SpellCastingState.GridCell c : castState.getConfirmedTargets()) {
-                affectedCells.add(new SpellPatternCalculator.GridCell(c.x, c.z));
-            }
-            if (affectedCells.isEmpty()) {
-                affectedCells.add(new SpellPatternCalculator.GridCell(aimGridX, aimGridZ));
-            }
+        if (castState.hasConfirmedCells()) {
+            // Player used /CastTarget — use the exact snapshot they locked in.
+            affectedCells = new HashSet<>(castState.getConfirmedCells());
         } else {
+            // No /CastTarget used — compute from current body position (original behaviour)
             switch (pattern) {
                 case SELF:
                 case AURA:
@@ -125,6 +148,7 @@ public class CastFinalCommand extends AbstractPlayerCommand {
                     break;
             }
         }
+
 
         StringBuilder dbg = new StringBuilder("[Griddify] [CASTFINAL] " + spell.getName()
                 + " dir=" + castState.getDirection().name()
@@ -266,18 +290,40 @@ public class CastFinalCommand extends AbstractPlayerCommand {
                     }
                 }
 
-                // ── ADDED: Fire_Bolt visual projectile ────────────────────────
-                // After damage is resolved, launch a fireball from the NPC position
-                // to the aimed grid cell as a visual effect. Only Fire_Bolt gets this;
-                // all other spells are unaffected.
-                if ("Fire_Bolt".equalsIgnoreCase(spell.getName())) {
+                // ── Spell projectile visuals ──────────────────────────────────
+                ProjectileType projType = ProjectileType.forSpell(spell.getName());
+                if (projType != null) {
+                    final ProjectileType finalType = projType;
                     final SpellCastingState finalCastState = castState;
-                    final int finalAimX = aimGridX;
-                    final int finalAimZ = aimGridZ;
-                    final float npcY    = state.npcY;
-                    world.execute(() ->
-                            launchFireBoltProjectile(world, finalCastState, finalAimX, finalAimZ, npcY)
-                    );
+                    final float npcY = state.npcY;
+                    final List<PlayerRef> allPlayers = playerManager.getAllPlayerRefs();
+                    final SpellPattern projPattern = spell.getPattern();
+                    final Set<SpellPatternCalculator.GridCell> finalCells = new HashSet<>(affectedCells);
+
+                    if (projPattern == SpellPattern.CONE) {
+                        world.execute(() -> launchConeProjectiles(
+                                finalType, world, finalCastState, finalCells, npcY, allPlayers));
+                    } else {
+                        // Use confirmed targets if /CastTarget was used; fall back to aim cell
+                        java.util.List<SpellCastingState.GridCell> targets =
+                                new java.util.ArrayList<>(castState.getConfirmedTargets());
+                        if (targets.isEmpty()) {
+                            targets.add(new SpellCastingState.GridCell(aimGridX, aimGridZ));
+                        }
+                        for (int i = 0; i < targets.size(); i++) {
+                            final SpellCastingState.GridCell tc = targets.get(i);
+                            final long delayMs = i * 120L;
+                            if (delayMs == 0) {
+                                world.execute(() -> launchSingleProjectile(
+                                        finalType, world, finalCastState, tc.x, tc.z, npcY, allPlayers));
+                            } else {
+                                PROJ_SCHEDULER.schedule(() ->
+                                                world.execute(() -> launchSingleProjectile(
+                                                        finalType, world, finalCastState, tc.x, tc.z, npcY, allPlayers)),
+                                        delayMs, java.util.concurrent.TimeUnit.MILLISECONDS);
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -346,62 +392,53 @@ public class CastFinalCommand extends AbstractPlayerCommand {
                 spell.getName() + " for " + totalDamage + " damage (" + monstersHit + " targets)");
     }
 
-    // ── ADDED: Fire_Bolt projectile launcher ─────────────────────────────────
+    // ── Projectile scheduler ──────────────────────────────────────────────────
 
-    /**
-     * Launches a Fire_BoltProjectile from the caster's NPC world position to
-     * the centre of the aimed grid cell. Called only for Fire_Bolt.
-     *
-     * Grid → world conversion: worldX = gridX * 2 + 1, worldZ = gridZ * 2 + 1
-     *
-     * The projectile is purely visual — damage is already resolved above.
-     * On arrival, Explosion_Big is sent to all players, then the projectile despawns.
-     *
-     * MUST be called inside world.execute().
-     */
-    private void launchFireBoltProjectile(World world, SpellCastingState castState,
-                                          int aimGridX, int aimGridZ, float npcY) {
-        // Caster origin: centre of NPC's frozen grid cell, at NPC chest height
-        float originX = (castState.getCasterGridX() * 2.0f) + 1.0f;
-        float originY = npcY + 1.2f; // chest height — slightly above ground level
-        float originZ = (castState.getCasterGridZ() * 2.0f) + 1.0f;
+    private static final java.util.concurrent.ScheduledExecutorService PROJ_SCHEDULER =
+            java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r -> {
+                Thread t = new Thread(r, "griddify-proj-scheduler");
+                t.setDaemon(true);
+                return t;
+            });
 
-        // Target: centre of aimed grid cell, scanning for actual terrain height.
-        // Uses same direct world.getBlockType() scan as GridOverlayManager — scan from
-        // npcY+30 downward 45 blocks so both uphill and downhill terrain is found.
-        float targetX = (aimGridX * 2.0f) + 1.0f;
-        float targetZ = (aimGridZ * 2.0f) + 1.0f;
-        Float scannedGroundY = SpellVisualManager.scanForGround(world, aimGridX, aimGridZ, npcY + 30.0f, 45);
-        float targetY = (scannedGroundY != null ? scannedGroundY : npcY) + 1.2f;
+    private void launchSingleProjectile(ProjectileType type, World world,
+                                        SpellCastingState castState,
+                                        int targetGridX, int targetGridZ,
+                                        float npcY, List<PlayerRef> players) {
+        float ox = (castState.getCasterGridX() * 2.0f) + 1.0f;
+        float oy = npcY + 1.2f;
+        float oz = (castState.getCasterGridZ() * 2.0f) + 1.0f;
+        float tx = (targetGridX * 2.0f) + 1.0f;
+        float tz = (targetGridZ * 2.0f) + 1.0f;
+        Float groundY = SpellVisualManager.scanForGround(world, targetGridX, targetGridZ, npcY + 30f, 45);
+        float ty = (groundY != null ? groundY : npcY) + 1.2f;
+        SpellProjectile.launch(type, world, new Vector3d(ox, oy, oz), new Vector3d(tx, ty, tz), players);
+    }
 
-        float dx = targetX - originX;
-        float dy = targetY - originY;
-        float dz = targetZ - originZ;
-        float len = (float) Math.sqrt(dx * dx + dy * dy + dz * dz);
+    private static final int CONE_PROJECTILE_COUNT = 15;
 
-        if (len < 0.0001f) {
-            System.out.println("[Griddify] [FIRE_BOLT] Caster and target are the same cell — skipping projectile.");
-            return;
+    private void launchConeProjectiles(ProjectileType type, World world,
+                                       SpellCastingState castState,
+                                       Set<SpellPatternCalculator.GridCell> cells,
+                                       float npcY, List<PlayerRef> players) {
+        if (cells.isEmpty()) return;
+        float ox = (castState.getCasterGridX() * 2.0f) + 1.0f;
+        float oy = npcY + 1.2f;
+        float oz = (castState.getCasterGridZ() * 2.0f) + 1.0f;
+
+        java.util.List<double[]> centers = new java.util.ArrayList<>();
+        for (SpellPatternCalculator.GridCell cell : cells) {
+            Float groundY = SpellVisualManager.scanForGround(world, cell.x, cell.z, npcY + 30f, 45);
+            double ty = (groundY != null ? groundY : npcY) + 1.2;
+            centers.add(new double[]{ (cell.x * 2.0) + 1.0, ty, (cell.z * 2.0) + 1.0 });
         }
-
-        Vector3f direction = new Vector3f(dx / len, dy / len, dz / len);
-
-        // Yaw/pitch for initial model rotation so texture faces travel direction
-        // Negate yaw: Hytale rotation is clockwise-positive, atan2 gives counterclockwise.
-        // S/N are unaffected (0 and ±π are symmetric), but E/W need the sign flip.
-        float yaw   = -(float) Math.atan2(dx, -dz);
-        float pitch = (float) Math.asin(-dy / len);
-
-        Vector3d origin = new Vector3d(originX, originY, originZ);
-        // Pass targetPos so Fire_BoltProjectile's arrival check fires correctly.
-        Vector3d targetPos = new Vector3d(targetX, targetY, targetZ);
-
-        System.out.println("[Griddify] [FIRE_BOLT] Launching projectile from ("
-                + originX + "," + originY + "," + originZ + ") → aim=("
-                + aimGridX + "," + aimGridZ + ") dist=" + String.format("%.1f", len / 2.0f) + " grids");
-
-        FireboltProjectile.launch(world, origin, direction, yaw, pitch, targetPos,
-                playerManager.getAllPlayerRefs());
+        for (int i = 0; i < CONE_PROJECTILE_COUNT; i++) {
+            double[] base = centers.get(i % centers.size());
+            double jx = (Math.random() - 0.5) * 1.4;
+            double jz = (Math.random() - 0.5) * 1.4;
+            final double tx = base[0] + jx, ty = base[1], tz = base[2] + jz;
+            SpellProjectile.launch(type, world, new Vector3d(ox, oy, oz), new Vector3d(tx, ty, tz), players);
+        }
     }
 
     // ── Existing helpers (unchanged) ─────────────────────────────────────────

@@ -35,7 +35,7 @@ public class SpellDatabase {
 
         registerBase(new SpellData(
                 "Magic_Missile",
-                1, 10, SpellPattern.SINGLE_TARGET, 0,
+                1, 24, SpellPattern.SINGLE_TARGET, 0,
                 "1d4", DamageType.FORCE,
                 ClassType.WIZARD, 1,
                 false, 0,
@@ -66,7 +66,7 @@ public class SpellDatabase {
                 "8d6", DamageType.LIGHTNING,
                 ClassType.WIZARD, 5,
                 false, 0,
-                "10-grid long line. DEX save for half. +1d6 per spell level above 3rd"
+                "20-grid long line. DEX save for half. +1d6 per spell level above 3rd"
         ));
 
         registerBase(new SpellData(
@@ -80,7 +80,7 @@ public class SpellDatabase {
 
         registerBase(new SpellData(
                 "Arcane_Barrage",
-                4, 15, SpellPattern.SINGLE_TARGET, 0,
+                4, 12, SpellPattern.SINGLE_TARGET, 0,
                 "4d10", DamageType.FORCE,
                 ClassType.WIZARD, 7,
                 false, 0,
@@ -133,7 +133,7 @@ public class SpellDatabase {
                 null, DamageType.NONE,
                 ClassType.FIGHTER, 7,
                 true, 10,
-                "WIS save or frightened for 1 minute. Disadvantage, can't move closer"
+                "WIS save or frightened for 1 minute. Disadvantage, can't move closer. Doenst affect other players"
         ));
 
         registerBase(new SpellData(
@@ -164,7 +164,7 @@ public class SpellDatabase {
                 null, DamageType.NONE,
                 ClassType.DRUID, 1,
                 true, 10,
-                "20ft square of grasping vines (2 grid radius = 5x5 grids). STR save or restrained. Difficult terrain"
+                "20ft square of grasping vines (2 grid radius = 4x4 grids). STR save or restrained. Difficult terrain"
         ));
 
         registerBase(new SpellData(

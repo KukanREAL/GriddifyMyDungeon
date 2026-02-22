@@ -1,0 +1,35 @@
+{
+  "Model": "Items/Fire_Bolt.blockymodel",
+  "Texture": "Items/Frost_Bolt.png",
+  "HitBox": {
+    "Max": {
+      "X": 0.15,
+      "Y": 0.15,
+      "Z": 0.15
+    },
+    "Min": {
+      "X": -0.15,
+      "Y": -0.15,
+      "Z": -0.15
+    }
+  },
+  "MinScale": 1,
+  "MaxScale": 1,
+  "Particles": [
+    {
+      "SystemId": "IceBall",
+      "Scale": 0.9,
+      "RotationOffset": {
+        "Pitch": 90
+      },
+      "PositionOffset": {
+        "Z": -0.3
+      },
+      "Color": "#d3f5fb"
+    },
+    {
+      "SystemId": "Block_Run_Ice",
+      "Scale": 2
+    }
+  ]
+}

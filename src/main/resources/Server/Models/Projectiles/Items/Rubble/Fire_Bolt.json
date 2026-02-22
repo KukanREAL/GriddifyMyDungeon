@@ -18,7 +18,38 @@
   "Trails": [
     {
       "TrailId": {
-        "Parent": "Fire_Trap_Fire"
+        "TexturePath": "Trails/Fire.png",
+        "LifeSpan": 6,
+        "Roll": 90,
+        "Start": {
+          "Width": 0.2
+        },
+        "End": {
+          "Width": 0.03
+        },
+        "RenderMode": "Erosion"
+      }
+    }
+  ],
+  "Particles": [
+    {
+      "SystemId": "Campfire_New_Cartoon",
+      "Scale": 1,
+      "RotationOffset": {
+        "Pitch": -90
+      },
+      "PositionOffset": {
+        "Z": -0.3
+      }
+    },
+    {
+      "SystemId": "Fire_Charge1",
+      "Scale": 1,
+      "RotationOffset": {
+        "Pitch": 90
+      },
+      "PositionOffset": {
+        "Z": -0.1
       }
     }
   ]

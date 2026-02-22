@@ -124,30 +124,24 @@ public class PlayerPositionTracker {
                         pattern == com.gridifymydungeon.plugin.spell.SpellPattern.AURA);
 
                 if (!isDirectional) {
-                    // Targeted spell — cancel if out of range
+                    // Targeted spell — warn once if out of range, but DON'T cancel.
+                    // /CastTarget and /CastFinal will refuse to fire while flag is set.
                     int dist = SpellPatternCalculator.getDistance(
                             castState.getCasterGridX(), castState.getCasterGridZ(), newGridX, newGridZ);
                     int range = castState.getSpell().getRangeGrids();
-                    if (range > 0 && dist > range) {
-                        state.clearSpellCastingState();
-                        // Keep the NPC frozen at its current cell — do NOT unfreeze.
-                        // Re-freeze with "post_cast" so the player must walk back to the
-                        // NPC's cell before it can move again. If we called unfreeze() here,
-                        // the very next position packet would treat it as a free move and
-                        // teleport the NPC to the player's out-of-range location.
-                        state.freeze("post_cast");
-                        world.execute(() -> {
-                            spellVisualManager.clearSpellVisuals(playerRef.getUuid(), world);
-                            spellVisualManager.clearRangeOverlay(playerRef.getUuid(), world);
-                        });
+                    boolean nowOut = range > 0 && dist > range;
+                    boolean newlyOut = castState.setOutOfRange(nowOut);
+                    if (newlyOut) {
                         playerRef.sendMessage(com.hypixel.hytale.server.core.Message.raw(
-                                "[Griddify] Out of range - spell cancelled! Return to your NPC to continue.").color("#FF0000"));
-                        return;
+                                "[Griddify] Out of range! (" + dist + "/" + range
+                                        + " grids) — return to range to confirm.").color("#FFA500"));
                     }
                 }
 
-                // If still casting after the range check, update position and redraw overlay
-                if (state.getSpellCastingState() != null) {
+                // If still casting after the range check, update position and redraw overlay.
+                // Skip if the player already confirmed a pattern with /CastTarget — the overlay
+                // should stay frozen on the confirmed cells regardless of where they walk.
+                if (state.getSpellCastingState() != null && !castState.hasConfirmedCells()) {
                     castState.updatePlayerPosition(newGridX, newGridZ); // updates direction for CONE/LINE/WALL
                     final int px = newGridX, pz = newGridZ;
                     final float py = (float) newPosition.getY();

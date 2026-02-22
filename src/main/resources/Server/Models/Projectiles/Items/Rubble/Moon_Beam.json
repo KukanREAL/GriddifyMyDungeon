@@ -1,0 +1,34 @@
+{
+  "Model": "Items/Empty.blockymodel",
+  "Texture": "Items/Empty.png",
+  "HitBox": {
+    "Max": {
+      "X": 0.15,
+      "Y": 0.15,
+      "Z": 0.15
+    },
+    "Min": {
+      "X": -0.15,
+      "Y": -0.15,
+      "Z": -0.15
+    }
+  },
+  "MinScale": 1,
+  "MaxScale": 1,
+  "Particles": [
+    {
+      "SystemId": "Drop_Common",
+      "Scale": 15,
+      "PositionOffset": {
+        "Y": -3
+      }
+    },
+    {
+      "SystemId": "Dance_Light_Player",
+      "Scale": 1,
+      "PositionOffset": {
+        "Y": -1
+      }
+    }
+  ]
+}
