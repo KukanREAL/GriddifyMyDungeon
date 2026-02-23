@@ -42,16 +42,21 @@ public class CastFinalCommand extends AbstractPlayerCommand {
     private final SpellVisualManager visualManager;
     private final CombatSettings combatSettings;
     private final RoleManager roleManager;
+    private final WildShapeManager wildShapeManager;
+    private final PolymorphManager polymorphManager;
 
     public CastFinalCommand(GridMoveManager playerManager, EncounterManager encounterManager,
                             SpellVisualManager visualManager, CombatSettings combatSettings,
-                            RoleManager roleManager) {
+                            RoleManager roleManager, WildShapeManager wildShapeManager,
+                            PolymorphManager polymorphManager) {
         super("CastFinal", "Execute prepared spell");
         this.playerManager = playerManager;
         this.encounterManager = encounterManager;
         this.visualManager = visualManager;
         this.combatSettings = combatSettings;
         this.roleManager = roleManager;
+        this.wildShapeManager = wildShapeManager;
+        this.polymorphManager = polymorphManager;
     }
 
     @Override
@@ -290,41 +295,227 @@ public class CastFinalCommand extends AbstractPlayerCommand {
                     }
                 }
 
-                // ── Spell projectile visuals ──────────────────────────────────
-                ProjectileType projType = ProjectileType.forSpell(spell.getName());
-                if (projType != null) {
-                    final ProjectileType finalType = projType;
-                    final SpellCastingState finalCastState = castState;
-                    final float npcY = state.npcY;
-                    final List<PlayerRef> allPlayers = playerManager.getAllPlayerRefs();
-                    final SpellPattern projPattern = spell.getPattern();
-                    final Set<SpellPatternCalculator.GridCell> finalCells = new HashSet<>(affectedCells);
+                // ── Spell visual effects ──────────────────────────────────────
+                final String spellKey = spell.getName().toLowerCase()
+                        .replace(" ", "_").replace("-", "_");
+                final float npcYFinal = state.npcY;
+                final List<PlayerRef> allPlayers = playerManager.getAllPlayerRefs();
+                final Set<SpellPatternCalculator.GridCell> finalCells = new HashSet<>(affectedCells);
+                final SpellCastingState finalCastState = castState;
 
-                    if (projPattern == SpellPattern.CONE) {
-                        world.execute(() -> launchConeProjectiles(
-                                finalType, world, finalCastState, finalCells, npcY, allPlayers));
+                // ── WILD SHAPE (toggle transform) ─────────────────────────────
+                if (spellKey.startsWith("wild_shape")) {
+                    if (wildShapeManager.isTransformed(playerRef.getUuid())) {
+                        wildShapeManager.revert(playerRef, world, true);
                     } else {
-                        // Use confirmed targets if /CastTarget was used; fall back to aim cell
+                        boolean ok = wildShapeManager.transform(playerRef, world, spell.getName());
+                        if (ok) {
+                            castState.setWildShapeActive(true, spell.getName());
+                            playerRef.sendMessage(Message.raw(
+                                    "[Griddify] Transformed into " + spell.getName().replace("_", " ")
+                                            + "! Cast Wild Shape again or reach 0 HP to revert.").color("#00FF7F"));
+                        }
+                    }
+
+                    // ── POLYMORPH — set pending target, await /polyform ────────────
+                } else if (spellKey.equals("polymorph")) {
+                    // Store the first confirmed target cell so /polyform can pick form
+                    SpellCastingState.GridCell polyTarget = castState.getConfirmedTargets().isEmpty()
+                            ? new SpellCastingState.GridCell(aimGridX, aimGridZ)
+                            : castState.getConfirmedTargets().get(0);
+                    castState.setPendingPolymorphTarget(polyTarget);
+                    playerRef.sendMessage(Message.raw(
+                                    "[Griddify] Polymorph ready! Choose form: /polyform {Bear | Dire_Wolf | Rex | Feran_Windwalker | Spider}")
+                            .color("#DA70D6"));
+                    playerRef.sendMessage(Message.raw(
+                            "[Griddify] Forms: " + PolymorphManager.Form.listNames()).color("#FFFFFF"));
+
+                    // ── CHROMATIC ORB — requires /orb element choice ──────────────
+                } else if (spellKey.equals("chromatic_orb")) {
+                    if (!castState.hasChromaticElement()) {
+                        playerRef.sendMessage(Message.raw(
+                                        "[Griddify] Choose element first: /orb {acid|fire|cold|lightning|poison|thunder}")
+                                .color("#FF0000"));
+                        state.stats.restoreSpellSlot(spell.getSlotCost());
+                        state.hasUsedAction = false;
+                        return;
+                    }
+                    ProjectileType orbType = ProjectileType.forElement(castState.getChromaticElement());
+                    if (orbType != null) {
                         java.util.List<SpellCastingState.GridCell> targets =
                                 new java.util.ArrayList<>(castState.getConfirmedTargets());
-                        if (targets.isEmpty()) {
+                        if (targets.isEmpty())
                             targets.add(new SpellCastingState.GridCell(aimGridX, aimGridZ));
-                        }
+                        final ProjectileType finalOrbType = orbType;
                         for (int i = 0; i < targets.size(); i++) {
                             final SpellCastingState.GridCell tc = targets.get(i);
                             final long delayMs = i * 120L;
                             if (delayMs == 0) {
                                 world.execute(() -> launchSingleProjectile(
-                                        finalType, world, finalCastState, tc.x, tc.z, npcY, allPlayers));
+                                        finalOrbType, world, finalCastState, tc.x, tc.z, npcYFinal, allPlayers));
                             } else {
                                 PROJ_SCHEDULER.schedule(() ->
                                                 world.execute(() -> launchSingleProjectile(
-                                                        finalType, world, finalCastState, tc.x, tc.z, npcY, allPlayers)),
+                                                        finalOrbType, world, finalCastState, tc.x, tc.z, npcYFinal, allPlayers)),
                                         delayMs, java.util.concurrent.TimeUnit.MILLISECONDS);
                             }
                         }
                     }
+
+                    // ── ALL OTHER SPELLS ──────────────────────────────────────────
+                } else {
+                    ProjectileType projType = ProjectileType.forSpell(spell.getName());
+                    if (projType != null) {
+                        final ProjectileType finalType = projType;
+                        final SpellPattern projPattern = spell.getPattern();
+
+                        if (projPattern == SpellPattern.CONE) {
+                            world.execute(() -> launchConeProjectiles(
+                                    finalType, world, finalCastState, finalCells, npcYFinal, allPlayers));
+
+                        } else if (projPattern == SpellPattern.SPHERE
+                                && (spellKey.equals("fireball") || spellKey.equals("quickened_fireball"))) {
+                            java.util.List<SpellCastingState.GridCell> targets =
+                                    new java.util.ArrayList<>(castState.getConfirmedTargets());
+                            if (targets.isEmpty())
+                                targets.add(new SpellCastingState.GridCell(aimGridX, aimGridZ));
+                            final SpellCastingState.GridCell tc = targets.get(0);
+                            world.execute(() -> launchFireballProjectile(
+                                    finalType, world, finalCastState, tc.x, tc.z, npcYFinal, allPlayers));
+
+                        } else {
+                            java.util.List<SpellCastingState.GridCell> targets =
+                                    new java.util.ArrayList<>(castState.getConfirmedTargets());
+                            if (targets.isEmpty())
+                                targets.add(new SpellCastingState.GridCell(aimGridX, aimGridZ));
+                            for (int i = 0; i < targets.size(); i++) {
+                                final SpellCastingState.GridCell tc = targets.get(i);
+                                final long delayMs = i * 120L;
+                                if (delayMs == 0) {
+                                    world.execute(() -> launchSingleProjectile(
+                                            finalType, world, finalCastState, tc.x, tc.z, npcYFinal, allPlayers));
+                                } else {
+                                    PROJ_SCHEDULER.schedule(() ->
+                                                    world.execute(() -> launchSingleProjectile(
+                                                            finalType, world, finalCastState, tc.x, tc.z, npcYFinal, allPlayers)),
+                                            delayMs, java.util.concurrent.TimeUnit.MILLISECONDS);
+                                }
+                            }
+                        }
+                    }
+
+                    // ── STATIONARY / WAVE / RAIN effects ─────────────────────
+                    switch (spellKey) {
+                        case "entangle": {
+                            for (SpellPatternCalculator.GridCell c : finalCells) {
+                                float wx = (c.x * 2.0f) + 1.0f;
+                                float wz = (c.z * 2.0f) + 1.0f;
+                                Float groundY = SpellVisualManager.scanForGround(
+                                        world, c.x, c.z, npcYFinal + 30f, 45);
+                                float wy = groundY != null ? groundY : npcYFinal;
+                                world.execute(() -> SpellVisualEffect.spawnGrowing(
+                                        "Entangle", 1.0f, world, wx, wy, wz, 500L));
+                            }
+                            break;
+                        }
+                        case "moonbeam": {
+                            SpellCastingState.GridCell tc = castState.getConfirmedTargets().isEmpty()
+                                    ? new SpellCastingState.GridCell(aimGridX, aimGridZ)
+                                    : castState.getConfirmedTargets().get(0);
+                            final int mx = tc.x, mz = tc.z;
+                            Float groundY = SpellVisualManager.scanForGround(
+                                    world, mx, mz, npcYFinal + 30f, 45);
+                            float wy = groundY != null ? groundY : npcYFinal;
+                            world.execute(() -> SpellVisualEffect.spawnStationary(
+                                    "Moon_Beam", 1.0f, world,
+                                    (mx * 2.0) + 1.0, wy, (mz * 2.0) + 1.0, 0f));
+                            break;
+                        }
+                        case "sunbeam": {
+                            float sunYaw = directionToYaw(castState.getDirection());
+                            float ox = (castState.getCasterGridX() * 2.0f) + 1.0f;
+                            float oz = (castState.getCasterGridZ() * 2.0f) + 1.0f;
+                            Float groundY = SpellVisualManager.scanForGround(
+                                    world, castState.getCasterGridX(), castState.getCasterGridZ(),
+                                    npcYFinal + 30f, 45);
+                            float wy = (groundY != null ? groundY : npcYFinal) + 1.0f;
+                            final float fYaw = sunYaw, fOx = ox, fWy = wy, fOz = oz;
+                            world.execute(() -> SpellVisualEffect.spawnStationary(
+                                    "Sun_Beam", 1.0f, world, fOx, fWy, fOz, fYaw));
+                            break;
+                        }
+                        case "thunderwave": {
+                            world.execute(() -> SpellVisualEffect.spawnWave(
+                                    "Thunderwave", 1.0f, world,
+                                    castState.getCasterGridX(), castState.getCasterGridZ(),
+                                    npcYFinal, finalCells, allPlayers));
+                            break;
+                        }
+                        case "ice_storm": {
+                            world.execute(() -> SpellVisualEffect.spawnIceStorm(
+                                    world, finalCells, npcYFinal, allPlayers));
+                            break;
+                        }
+                    }
                 }
+
+            }
+        }
+
+
+        // ── HEAL VISUALS ───────────────────────────────────────────────────────
+        // Spawn Heal_One on each healed creature, Heal_Circle under caster for area heals
+        if (isHeal && targetsAffected > 0) {
+            boolean isAreaHeal = spell.getAreaGrids() > 0
+                    || spell.getPattern() == SpellPattern.SPHERE
+                    || spell.getPattern() == SpellPattern.CYLINDER
+                    || spell.getPattern() == SpellPattern.CUBE
+                    || spell.getPattern() == SpellPattern.AURA;
+
+            // Collect world positions of all healed targets
+            java.util.List<float[]> healedPositions = new java.util.ArrayList<>();
+
+            if (casterIsGM) {
+                for (MonsterState ms : encounterManager.getMonsters()) {
+                    if (!ms.isAlive()) continue;
+                    if (affectedCells.contains(new SpellPatternCalculator.GridCell(ms.currentGridX, ms.currentGridZ))) {
+                        float wx = (ms.currentGridX * 2.0f) + 1.0f;
+                        float wz = (ms.currentGridZ * 2.0f) + 1.0f;
+                        Float gy = SpellVisualManager.scanForGround(world, ms.currentGridX, ms.currentGridZ,
+                                ms.spawnY + 30f, 45);
+                        float wy = gy != null ? gy : ms.spawnY;
+                        healedPositions.add(new float[]{wx, wy, wz});
+                    }
+                }
+            } else {
+                for (GridPlayerState ps : playerManager.getAllStates()) {
+                    if (ps.npcEntity == null || !ps.npcEntity.isValid()) continue;
+                    if (affectedCells.contains(new SpellPatternCalculator.GridCell(ps.currentGridX, ps.currentGridZ))) {
+                        float wx = (ps.currentGridX * 2.0f) + 1.0f;
+                        float wz = (ps.currentGridZ * 2.0f) + 1.0f;
+                        Float gy = SpellVisualManager.scanForGround(world, ps.currentGridX, ps.currentGridZ,
+                                state.npcY + 30f, 45);
+                        float wy = gy != null ? gy : state.npcY;
+                        healedPositions.add(new float[]{wx, wy, wz});
+                    }
+                }
+            }
+
+            if (isAreaHeal) {
+                float casterWx = (state.getSpellCastingState() != null
+                        ? state.getSpellCastingState().getCasterGridX() : aimGridX) * 2.0f + 1.0f;
+                float casterWz = (state.getSpellCastingState() != null
+                        ? state.getSpellCastingState().getCasterGridZ() : aimGridZ) * 2.0f + 1.0f;
+                Float cgy = SpellVisualManager.scanForGround(world, aimGridX, aimGridZ, state.npcY + 30f, 45);
+                float casterWy = cgy != null ? cgy : state.npcY;
+                final float fcWx = casterWx, fcWy = casterWy, fcWz = casterWz;
+                final java.util.List<float[]> fPos = healedPositions;
+                world.execute(() -> SpellVisualEffect.spawnHealArea(world, fcWx, fcWy, fcWz, fPos));
+            } else {
+                final java.util.List<float[]> fPos = healedPositions;
+                world.execute(() -> {
+                    for (float[] p : fPos) SpellVisualEffect.spawnHealOne(world, p[0], p[1], p[2]);
+                });
             }
         }
 
@@ -414,6 +605,56 @@ public class CastFinalCommand extends AbstractPlayerCommand {
         float ty = (groundY != null ? groundY : npcY) + 1.2f;
         SpellProjectile.launch(type, world, new Vector3d(ox, oy, oz), new Vector3d(tx, ty, tz), players);
     }
+
+    /**
+     * Fireball: one large projectile that — on arrival — spawns a Moon_Beam for 1 second.
+     * SpellProjectile.launch returns the Ref; we use a callback via a custom overload
+     * that runs arrivalCallback instead of just despawning.
+     * Since SpellProjectile doesn't support callbacks yet, we schedule the Moon_Beam
+     * based on travel-time estimate (dist / velocity) + 200ms padding.
+     */
+    private void launchFireballProjectile(ProjectileType type, World world,
+                                          SpellCastingState castState,
+                                          int targetGridX, int targetGridZ,
+                                          float npcY, List<PlayerRef> players) {
+        float ox = (castState.getCasterGridX() * 2.0f) + 1.0f;
+        float oy = npcY + 1.2f;
+        float oz = (castState.getCasterGridZ() * 2.0f) + 1.0f;
+        float tx = (targetGridX * 2.0f) + 1.0f;
+        float tz = (targetGridZ * 2.0f) + 1.0f;
+        Float groundY = SpellVisualManager.scanForGround(world, targetGridX, targetGridZ, npcY + 30f, 45);
+        float ty = (groundY != null ? groundY : npcY) + 1.2f;
+
+        double dist = Math.sqrt(Math.pow(tx - ox, 2) + Math.pow(tz - oz, 2));
+        // MUZZLE_VELOCITY is 12 world units/s; estimate travel time + buffer
+        long travelMs = (long)(dist / 12.0 * 1000) + 150;
+
+        SpellProjectile.launch(type, world, new Vector3d(ox, oy, oz), new Vector3d(tx, ty, tz), players);
+
+        // Schedule Moon_Beam at target for 1 second after projectile arrives
+        final double ftx = tx, fty = ty, ftz = tz;
+        PROJ_SCHEDULER.schedule(() -> world.execute(() ->
+                        SpellVisualEffect.spawnWithTimeout(
+                                "Moon_Beam", 1.5f, world, ftx, fty, ftz, 0f, 1000L)),
+                travelMs, java.util.concurrent.TimeUnit.MILLISECONDS);
+    }
+
+    /** Convert Direction8 to yaw radians for entity orientation. */
+    private static float directionToYaw(Direction8 dir) {
+        switch (dir) {
+            case NORTH:     return 0f;
+            case NORTHEAST: return (float)(Math.PI * 0.25);
+            case EAST:      return (float)(Math.PI * 0.5);
+            case SOUTHEAST: return (float)(Math.PI * 0.75);
+            case SOUTH:     return (float) Math.PI;
+            case SOUTHWEST: return (float)(Math.PI * 1.25);
+            case WEST:      return (float)(Math.PI * 1.5);
+            case NORTHWEST: return (float)(Math.PI * 1.75);
+            default:        return 0f;
+        }
+    }
+
+
 
     private static final int CONE_PROJECTILE_COUNT = 15;
 

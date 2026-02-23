@@ -78,6 +78,16 @@ public class SpellDatabase {
                 "12-grid cone. CON save for half. +1d8 per spell level above 5th"
         ));
 
+
+        registerBase(new SpellData(
+                "Polymorph",
+                4, 12, SpellPattern.SINGLE_TARGET, 0,
+                null, DamageType.NONE,
+                ClassType.WIZARD, 7,
+                true, 10,
+                "Transform one target into: Bear (34 HP), Dire_Wolf (37 HP), Rex (136 HP), Feran_Windwalker (45 HP), or Spider (26 HP). Lasts 10 turns or until target drops to 0 HP", 1
+        ));
+
         registerBase(new SpellData(
                 "Arcane_Barrage",
                 4, 12, SpellPattern.SINGLE_TARGET, 0,
@@ -101,12 +111,12 @@ public class SpellDatabase {
         ));
 
         registerBase(new SpellData(
-                "Shield_Bash",
+                "Power_Strike",
                 0, 0, SpellPattern.SINGLE_TARGET, 0,
                 "2d6", DamageType.BLUDGEONING,
                 ClassType.FIGHTER, 3,
                 false, 0,
-                "STR save or target knocked prone and pushed 1 grid"
+                "Brutal blow. STR save or target takes +2d6 bonus damage and is pushed 1 grid back"
         ));
 
         registerBase(new SpellData(
@@ -119,21 +129,21 @@ public class SpellDatabase {
         ));
 
         registerBase(new SpellData(
-                "Charging_Strike",
+                "Devastating_Charge",
                 0, 0, SpellPattern.LINE, 6,
                 "3d10", DamageType.BLUDGEONING,
                 ClassType.FIGHTER, 5,
                 false, 0,
-                "+1d6 per 2 grids charged. Must move at least 4 grids straight before attack"
+                "Charge through a 6-grid line, dealing 3d10 to all in path. DEX save for half"
         ));
 
         registerBase(new SpellData(
-                "Intimidating_Shout",
+                "Battle_Cry",
                 0, 0, SpellPattern.CONE, 8,
                 null, DamageType.NONE,
                 ClassType.FIGHTER, 7,
-                true, 10,
-                "WIS save or frightened for 1 minute. Disadvantage, can't move closer. Doenst affect other players"
+                true, 2,
+                "Thunderous war cry. WIS save or target loses their next action (stunned 2 turns). Does not affect other players"
         ));
 
         registerBase(new SpellData(
@@ -209,7 +219,7 @@ public class SpellDatabase {
                 "2d6", DamageType.PIERCING,
                 ClassType.DRUID, 5,
                 true, 100,
-                "Transform into dire wolf. Knock prone on hit, pack tactics. High mobility"
+                "Transform into dire wolf. Savage bite deals 2d6 piercing + target takes 1d6 bleeding damage next turn. High mobility"
         ));
 
         registerBase(new SpellData(
@@ -244,21 +254,21 @@ public class SpellDatabase {
         ));
 
         registerBase(new SpellData(
-                "Step_of_the_Wind",
-                0, 0, SpellPattern.SELF, 0,
+                "Wind_Dash",
+                0, 12, SpellPattern.SELF, 0,
                 null, DamageType.NONE,
                 ClassType.MONK, 1,
                 false, 0,
-                "Bonus action. Costs 1 Ki. Double jump, disengage or dash. No opportunity attacks"
+                "Costs 1 Ki. Teleport up to 6 grids instantly. Next attack this turn has +1d6 bonus damage"
         ));
 
         registerBase(new SpellData(
-                "Deflect_Missiles",
+                "Iron_Body",
                 0, 0, SpellPattern.SELF, 0,
                 null, DamageType.NONE,
                 ClassType.MONK, 1,
-                false, 0,
-                "Reaction. Reduce damage by 1d10+DEX+Monk level. Spend 1 Ki to throw back"
+                false, 1,
+                "Costs 1 Ki. Harden your body — reduce the next damage you take by 1d10 + DEX + Monk level. Lasts until start of next turn"
         ));
 
         registerBase(new SpellData(
@@ -316,7 +326,7 @@ public class SpellDatabase {
                 null, DamageType.NONE,
                 ClassType.BARD, 1,
                 false, 0,
-                "Bonus action. Grant 1d6 bonus to attack/save/check. Die increases with level"
+                "Grant one ally +1d6 to their next attack roll, save, or ability check (GM adds manually). Die increases with level"
         ));
 
         registerBase(new SpellData(
@@ -343,25 +353,25 @@ public class SpellDatabase {
                 null, DamageType.NONE,
                 ClassType.BARD, 5,
                 true, 10,
-                "30ft cube (3 grid radius = 7x7 grids). WIS save or charmed/incapacitated. Ends if damaged or shaken"
+                "30ft cube (3 grid radius = 7x7 grids). WIS save or incapacitated for 2 turns. Concentration — breaks if caster is hit"
         ));
 
         registerBase(new SpellData(
-                "Song_of_Rest",
-                0, 0, SpellPattern.AURA, 99,
-                null, DamageType.NONE,
+                "Healing_Song",
+                0, 0, SpellPattern.AURA, 6,
+                "1d6", DamageType.NONE,
                 ClassType.BARD, 1,
                 false, 0,
-                "Short rest only. Allies regain extra 1d6 HP. Die increases with level"
+                "Soothing melody heals all allies within 6 grids for 1d6 HP. Usable once per encounter"
         ));
 
         registerBase(new SpellData(
-                "Mass_Suggestion",
-                6, 12, SpellPattern.SINGLE_TARGET, 0,
-                null, DamageType.NONE,
+                "Mass_Psychic_Blast",
+                6, 12, SpellPattern.SPHERE, 6,
+                "4d8", DamageType.PSYCHIC,
                 ClassType.BARD, 9,
-                true, 1440,
-                "Up to 12 targets. WIS save or follow reasonable suggestion for 24 hours"
+                false, 0,
+                "Psychic shockwave in 6-grid sphere. WIS save for half. On fail: target also loses their next action"
         ));
 
         registerBase(new SpellData(
@@ -552,12 +562,12 @@ public class SpellDatabase {
         ));
 
         registerBase(new SpellData(
-                "Armor_of_Agathys",
-                1, 0, SpellPattern.SELF, 0,
+                "Frost_Shell",
+                1, 0, SpellPattern.AURA, 1,
                 "5", DamageType.COLD,
                 ClassType.WARLOCK, 1,
                 true, 10,
-                "Gain 5 temp HP. Attackers take 5 cold damage. +5 HP per level"
+                "Gain 5 temp HP per slot level. Each turn: adjacent enemies take 5 cold damage (no save). Lasts 10 turns"
         ));
 
         // =====================================================================
@@ -627,21 +637,21 @@ public class SpellDatabase {
         ));
 
         registerBase(new SpellData(
-                "Cunning_Action",
-                0, 0, SpellPattern.SELF, 0,
+                "Shadow_Dash",
+                0, 8, SpellPattern.SELF, 0,
                 null, DamageType.NONE,
                 ClassType.ROGUE, 1,
                 false, 0,
-                "Bonus action: Dash, Disengage, or Hide"
+                "Teleport up to 4 grids in any direction instantly. Next attack this turn deals +2d6 sneak damage"
         ));
 
         registerBase(new SpellData(
-                "Uncanny_Dodge",
+                "Evasive_Roll",
                 0, 0, SpellPattern.SELF, 0,
                 null, DamageType.NONE,
                 ClassType.ROGUE, 3,
-                false, 0,
-                "Reaction. Halve damage from one attack you can see"
+                false, 1,
+                "Declare before being attacked. Next attack against you this turn has disadvantage (GM tracks). Costs your reaction"
         ));
     }
 
@@ -1213,15 +1223,15 @@ public class SpellDatabase {
 
         // ── WOLF ──────────────────────────────────────────────────────────────
         ma("Wolf_Bite",          1, SpellPattern.SINGLE_TARGET, 0, "2d4+2",DamageType.PIERCING,   MonsterType.WOLF,
-                "Wolf bite. 1 grid. Target STR save or knocked prone.");
+                "Wolf bite. 1 grid. Target STR save or stunned 1 turn.");
         ma("Wolf_Pack",          0, SpellPattern.CONE,          2, "1d6+2",DamageType.PIERCING,   MonsterType.WOLF,
                 "Pack lunge. 2-grid cone.");
 
         // ── BOAR ──────────────────────────────────────────────────────────────
         ma("Boar_Tusk",          1, SpellPattern.SINGLE_TARGET, 0, "2d6+3",DamageType.SLASHING,   MonsterType.BOAR,
-                "Tusk gore. 1 grid. Target STR save or knocked prone.");
+                "Tusk gore. 1 grid. Target STR save or stunned 1 turn.");
         ma("Boar_Charge",        3, SpellPattern.LINE,          3, "2d6+3",DamageType.BLUDGEONING,MonsterType.BOAR,
-                "Charge. LINE 3 grids. Target STR save or knocked prone.");
+                "Charge. LINE 3 grids. Target STR save or stunned 1 turn.");
 
         // ── CROCODILE ─────────────────────────────────────────────────────────
         ma("Croc_Bite",          1, SpellPattern.SINGLE_TARGET, 0, "1d10+5",DamageType.PIERCING,  MonsterType.CROCODILE,
@@ -1251,7 +1261,7 @@ public class SpellDatabase {
         ma("BigCat_Bite",        1, SpellPattern.SINGLE_TARGET, 0, "1d8+4",DamageType.PIERCING,   MonsterType.BIG_CAT,
                 "Bite. 1 grid.");
         ma("BigCat_Pounce",      3, SpellPattern.LINE,          3, "2d6+4",DamageType.SLASHING,   MonsterType.BIG_CAT,
-                "Pounce. LINE 3 grids. STR save or prone + bite attack.");
+                "Pounce. LINE 3 grids. STR save or stunned 1 turn + follow-up bite.");
         ma("BigCat_Claw",        0, SpellPattern.CONE,          2, "1d6+4",DamageType.SLASHING,   MonsterType.BIG_CAT,
                 "Claw swipe. 2-grid cone.");
 
@@ -1263,9 +1273,9 @@ public class SpellDatabase {
 
         // ── REX ───────────────────────────────────────────────────────────────
         ma("Rex_Bite",           1, SpellPattern.SINGLE_TARGET, 0, "4d12+7",DamageType.PIERCING,  MonsterType.REX,
-                "Massive bite. 1 grid, 4d12+7.");
+                "Massive bite. 1 grid, 4d12+7. Target CON save or stunned 1 turn.");
         ma("Rex_Stomp",          0, SpellPattern.AURA,          2, "2d10+7",DamageType.BLUDGEONING,MonsterType.REX,
-                "Ground stomp. 2-grid aura. DEX save or knocked prone.");
+                "Ground stomp. 2-grid aura. DEX save or stunned 1 turn.");
         ma("Rex_Roar",           0, SpellPattern.CONE,          5, null,   DamageType.NONE,       MonsterType.REX,
                 "Terrifying roar. 5-grid cone. WIS save or frightened.");
 
@@ -1289,7 +1299,7 @@ public class SpellDatabase {
         ma("Warthog_Tusk",       1, SpellPattern.SINGLE_TARGET, 0, "2d6+3",DamageType.SLASHING,   MonsterType.WARTHOG,
                 "Tusk gore. 1 grid.");
         ma("Warthog_Charge",     3, SpellPattern.LINE,          3, "2d6+3",DamageType.BLUDGEONING,MonsterType.WARTHOG,
-                "Charge. LINE 3 grids.");
+                "Charge. LINE 3 grids. Target STR save or stunned 1 turn.");
 
         // ── YETI ──────────────────────────────────────────────────────────────
         ma("Yeti_Slam",          1, SpellPattern.SINGLE_TARGET, 0, "2d6+5",DamageType.BLUDGEONING,MonsterType.YETI,
@@ -1367,15 +1377,15 @@ public class SpellDatabase {
         ma("Trillo_Bite",        1, SpellPattern.SINGLE_TARGET,  0, "2d8+5",DamageType.PIERCING,  MonsterType.TRILLODON,
                 "Crushing bite. 1 grid.");
         ma("Trillo_Charge",      4, SpellPattern.LINE,           4, "2d6+5",DamageType.BLUDGEONING,MonsterType.TRILLODON,
-                "Charge. LINE 4 grids, STR save or prone.");
+                "Charge. LINE 4 grids. STR save or stunned 1 turn.");
 
         // ── TOAD RHINO ────────────────────────────────────────────────────────
         ma("ToadRhino_Gore",     1, SpellPattern.SINGLE_TARGET,  0, "2d8+5",DamageType.PIERCING,  MonsterType.TOAD_RHINO,
                 "Horn gore. 1 grid.");
         ma("ToadRhino_Charge",   4, SpellPattern.LINE,           4, "2d8+5",DamageType.BLUDGEONING,MonsterType.TOAD_RHINO,
-                "Charge. LINE 4 grids.");
+                "Charge. LINE 4 grids. STR save or stunned 1 turn.");
         ma("ToadRhino_Stomp",    0, SpellPattern.AURA,           1, "2d6+5",DamageType.BLUDGEONING,MonsterType.TOAD_RHINO,
-                "Stomp. 1-grid aura. DEX save or knocked prone.");
+                "Stomp. 1-grid aura. DEX save or stunned 1 turn.");
 
         // ── SPARK LIVING ──────────────────────────────────────────────────────
         ma("Spark_ZapBolt",      6, SpellPattern.LINE,           4, "2d6",  DamageType.LIGHTNING,  MonsterType.SPARK_LIVING,

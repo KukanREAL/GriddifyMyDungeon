@@ -45,6 +45,17 @@ public class SpellCastingState {
     // Out-of-range tracking: warn once, don't cancel; block /CastTarget and /CastFinal
     private boolean currentlyOutOfRange = false;
 
+    // Chromatic Orb: chosen element (acid/fire/cold/lightning/poison/thunder), null = not yet chosen
+    private String chromaticElement = null;
+
+    // Polymorph: the target cell set by /castfinal, awaiting /polyform for form choice
+    private GridCell pendingPolymorphTarget = null;
+
+    // Wild Shape: true while player is transformed
+    private boolean wildShapeActive = false;
+    private String wildShapeForm = null; // e.g. "Wild_Shape_Bear"
+
+
     public static class GridCell {
         public final int x, z;
         public GridCell(int x, int z) { this.x = x; this.z = z; }
@@ -113,16 +124,27 @@ public class SpellCastingState {
     public int getAimGridX() { return aimGridX; }
     public int getAimGridZ() { return aimGridZ; }
 
-    /** For multi-target spells: confirm current aim as a target (up to spell.maxTargets) */
+    /**
+     * Confirm the current aim cell as a target.
+     * - Same cell CAN be confirmed multiple times (each hit on the same spot is valid,
+     *   and shows a smaller Grid_Spell overlay entity each time).
+     * - For multi-target spells (maxTargets > 1): capped at maxTargets total.
+     * - For single-target spells: uncapped — player decides when to /CastFinal.
+     * Always returns true (caller can always add another target unless multi-target cap).
+     */
     public boolean confirmTarget() {
-        int max = spell.getMaxTargets();
-        if (confirmedTargets.size() >= max) return false;
-        // Don't add duplicates
-        for (GridCell c : confirmedTargets) {
-            if (c.x == aimGridX && c.z == aimGridZ) return false;
-        }
+        if (confirmedTargets.size() >= spell.getMaxTargets()) return false;
         confirmedTargets.add(new GridCell(aimGridX, aimGridZ));
         return true;
+    }
+
+    /** How many times the cell (x, z) has been confirmed as a target. */
+    public int getTargetCountAt(int x, int z) {
+        int count = 0;
+        for (GridCell c : confirmedTargets) {
+            if (c.x == x && c.z == z) count++;
+        }
+        return count;
     }
 
     public java.util.List<GridCell> getConfirmedTargets() { return confirmedTargets; }
@@ -138,14 +160,33 @@ public class SpellCastingState {
      */
     public void setConfirmedCells(java.util.Set<SpellPatternCalculator.GridCell> cells, int aimX, int aimZ) {
         this.confirmedCells = new java.util.HashSet<>(cells);
-        confirmedTargets.clear();
-        confirmedTargets.add(new GridCell(aimX, aimZ));
+        // Do NOT touch confirmedTargets here — CastTargetCommand calls confirmTarget()
+        // immediately after, which adds the aim cell. Pre-adding it here would double-count.
     }
 
     /** Returns the confirmed pattern cells as SpellPatternCalculator.GridCell, or null if not yet confirmed. */
     public java.util.Set<SpellPatternCalculator.GridCell> getConfirmedCells() { return confirmedCells; }
 
     public boolean hasConfirmedCells() { return confirmedCells != null && !confirmedCells.isEmpty(); }
+
+    // ── Chromatic Orb ────────────────────────────────────────────────────────
+
+    public void setChromaticElement(String element) { this.chromaticElement = element; }
+    public String getChromaticElement() { return chromaticElement; }
+    public boolean hasChromaticElement() { return chromaticElement != null; }
+
+    public void setPendingPolymorphTarget(GridCell cell) { this.pendingPolymorphTarget = cell; }
+    public GridCell getPendingPolymorphTarget() { return pendingPolymorphTarget; }
+    public void clearPendingPolymorphTarget() { this.pendingPolymorphTarget = null; }
+
+    // ── Wild Shape ────────────────────────────────────────────────────────────
+
+    public void setWildShapeActive(boolean active, String form) {
+        this.wildShapeActive = active;
+        this.wildShapeForm = form;
+    }
+    public boolean isWildShapeActive() { return wildShapeActive; }
+    public String getWildShapeForm() { return wildShapeForm; }
 
     // ── Out-of-range tracking ─────────────────────────────────────────────────
 

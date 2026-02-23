@@ -1,6 +1,6 @@
 {
   "Model": "Items/Magic_Bolt.blockymodel",
-  "Texture": "Items/Magic_Bolt.png",
+  "Texture": "Items/Magic_Spell.png",
   "HitBox": {
     "Max": {
       "X": 0.15,

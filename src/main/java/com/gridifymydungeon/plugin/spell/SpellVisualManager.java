@@ -96,6 +96,102 @@ public class SpellVisualManager {
                 " cells → " + newVisuals.size() + " placed");
     }
 
+
+    /**
+     * Spawn one additional scaled Grid_Spell tile for a stacked /CastTarget on the same cell.
+     * hitCount = how many times this cell has been confirmed total (1 = first hit = scale 1.0,
+     * 2 = second hit = scale 0.8, 3 = 0.6, etc.).
+     * Does NOT clear existing visuals — just appends the new entity.
+     * Must be called inside world.execute().
+     */
+    public void addStackedSpellTile(UUID playerUUID, SpellPatternCalculator.GridCell cell,
+                                    int hitCount, World world, float referenceY) {
+        float scale = Math.max(0.2f, 1.0f - (hitCount - 1) * 0.2f);
+        ModelAsset asset;
+        try {
+            asset = ModelAsset.getAssetMap().getAsset(SPELL_MODEL_ID);
+            if (asset == null) return;
+        } catch (Exception e) { return; }
+        Model scaled = Model.createScaledModel(asset, scale);
+
+        float cx = (cell.x * 2.0f) + 1.0f;
+        float cz = (cell.z * 2.0f) + 1.0f;
+        Float groundY = scanForGround(world, cell.x, cell.z, referenceY + 30f, 45);
+        float y = (groundY != null ? groundY : referenceY) + 0.03f + (hitCount - 1) * 0.01f;
+
+        Store<EntityStore> store = world.getEntityStore().getStore();
+        Ref<EntityStore> ref = spawnTile(store, scaled, cx, y, cz);
+        if (ref != null) {
+            playerSpellVisuals.computeIfAbsent(playerUUID, k -> new ArrayList<>()).add(ref);
+        }
+    }
+
+    /**
+     * Heal visual for SINGLE-TARGET heals:
+     * Spawn Heal_One particle effect at the healed creature's world position for 3 seconds.
+     * Must be called inside world.execute().
+     */
+    public static void spawnHealOne(World world, float wx, float wy, float wz) {
+        spawnTimedEntity("Heal_One", 1.0f, world, wx, wy, wz, 3000L);
+    }
+
+    /**
+     * Heal visual for AREA heals:
+     * Spawn Heal_Circle under the caster + Heal_One at every affected creature position.
+     * Must be called inside world.execute().
+     */
+    public static void spawnHealArea(World world,
+                                     float casterWx, float casterWy, float casterWz,
+                                     java.util.List<float[]> targetPositions) {
+        spawnTimedEntity("Heal_Circle", 1.5f, world, casterWx, casterWy, casterWz, 3000L);
+        for (float[] pos : targetPositions) {
+            spawnTimedEntity("Heal_One", 1.0f, world, pos[0], pos[1], pos[2], 3000L);
+        }
+    }
+
+    /**
+     * Spawn a model entity and despawn it after {@code lifetimeMs} milliseconds.
+     * Self-contained — no dependency on SpellVisualEffect.
+     */
+    private static void spawnTimedEntity(String modelId, float scale,
+                                         World world, float x, float y, float z,
+                                         long lifetimeMs) {
+        try {
+            ModelAsset asset = ModelAsset.getAssetMap().getAsset(modelId);
+            if (asset == null) {
+                System.err.println("[Griddify] [HEAL] Model not found: " + modelId);
+                return;
+            }
+            Model model = Model.createScaledModel(asset, scale);
+            Store<EntityStore> store = world.getEntityStore().getStore();
+            Ref<EntityStore> ref = new com.hypixel.hytale.component.Ref<>(store);
+            Holder<EntityStore> holder = EntityStore.REGISTRY.newHolder();
+            holder.addComponent(TransformComponent.getComponentType(),
+                    new TransformComponent(new Vector3d(x, y, z), new Vector3f(0, 0, 0)));
+            holder.addComponent(ModelComponent.getComponentType(), new ModelComponent(model));
+            holder.addComponent(BoundingBox.getComponentType(), new BoundingBox(model.getBoundingBox()));
+            holder.addComponent(NetworkId.getComponentType(),
+                    new NetworkId(store.getExternalData().takeNextNetworkId()));
+            holder.ensureComponent(com.hypixel.hytale.server.core.entity.UUIDComponent.getComponentType());
+            Ref<EntityStore> spawnedRef = store.addEntity(holder, AddReason.SPAWN);
+            if (spawnedRef != null) {
+                final Ref<EntityStore> fr = spawnedRef;
+                new Thread(() -> {
+                    try {
+                        Thread.sleep(lifetimeMs);
+                        world.execute(() -> {
+                            try {
+                                if (fr.isValid()) store.removeEntity(fr, RemoveReason.REMOVE);
+                            } catch (Exception ignored) {}
+                        });
+                    } catch (InterruptedException ignored) {}
+                }, "HealVisual-Despawn").start();
+            }
+        } catch (Exception e) {
+            System.err.println("[Griddify] [HEAL] spawnTimedEntity failed: " + e.getMessage());
+        }
+    }
+
     public void clearSpellVisuals(UUID playerUUID, World world) {
         List<Ref<EntityStore>> visuals = playerSpellVisuals.remove(playerUUID);
         if (visuals == null) return;

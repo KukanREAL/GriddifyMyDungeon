@@ -171,6 +171,20 @@ public class CastCommand extends AbstractPlayerCommand {
             return;
         }
 
+        // Chromatic Orb: set up state then prompt for /orb element choice
+        // -----------------------------------------------------------------------
+        if (spell.getName().equalsIgnoreCase("Chromatic_Orb")) {
+            Set<SpellPatternCalculator.GridCell> cells = SpellPatternCalculator.calculatePattern(
+                    pattern, initialDirection, casterGridX, casterGridZ,
+                    spell.getRangeGrids(), spell.getAreaGrids());
+            visualManager.showSpellArea(playerRef.getUuid(), cells, world, playerY);
+            state.setSpellCastingState(new SpellCastingState(spell, null, initialDirection, casterGridX, casterGridZ, casterY));
+            playerRef.sendMessage(Message.raw("[Griddify] Chromatic Orb prepared!").color("#DA70D6"));
+            playerRef.sendMessage(Message.raw("[Griddify] Choose element: /orb {acid | fire | cold | lightning | poison | thunder}").color("#DA70D6"));
+            System.out.println("[Griddify] [CAST] " + playerRef.getUsername() + " preparing Chromatic_Orb — awaiting /orb");
+            return;
+        }
+
         // -----------------------------------------------------------------------
         // All other patterns: freeze NPC/monster, player walks to aim / rotate
         // -----------------------------------------------------------------------

@@ -1,6 +1,6 @@
 {
   "Model": "Items/Fire_Bolt.blockymodel",
-  "Texture": "Items/Frost_Bolt.png",
+  "Texture": "Items/Frost_Spell.png",
   "HitBox": {
     "Max": {
       "X": 0.15,

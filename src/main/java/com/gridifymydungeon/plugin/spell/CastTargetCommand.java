@@ -15,17 +15,18 @@ import javax.annotation.Nonnull;
 import java.util.Set;
 
 /**
- * /CastTarget — Snapshot the current spell pattern and lock it in.
+ * /CastTarget — Confirm the current aim cell (or pattern snapshot) as a target.
  *
- * Works for ALL patterns:
- *   SINGLE_TARGET : confirms the one cell under the player → /CastFinal fires at it
- *   CONE/LINE/WALL: confirms the entire facing cone/line as currently shown → /CastFinal fires it
- *   SPHERE/CUBE   : confirms the full area centred on the player → /CastFinal fires it
- *   MULTI-TARGET  : for spells like Magic Missile — call /CastTarget once per target cell
- *                   (up to spell.maxTargets), then /CastFinal
+ * Can be called multiple times:
+ *   - Each call appends one entry to confirmedTargets.
+ *   - Targeting the SAME cell again is allowed: each duplicate spawns a new Grid_Spell
+ *     that is 0.2 smaller (first = 1.0, second = 0.8, third = 0.6, …)
+ *   - For multi-target spells (Magic Missile etc.): capped at spell.maxTargets.
+ *   - For CONE/LINE/WALL: snapshots the entire pattern on first call, subsequent calls
+ *     are ignored (the whole pattern fires together).
+ *   - The overlay freezes (stops following the player) after the first /CastTarget.
  *
  * Blocked if the player is currently outside the spell's range.
- * The player can then move freely to watch the effect, then /CastFinal from anywhere.
  */
 public class CastTargetCommand extends AbstractPlayerCommand {
 
@@ -33,7 +34,7 @@ public class CastTargetCommand extends AbstractPlayerCommand {
     private final SpellVisualManager visualManager;
 
     public CastTargetCommand(GridMoveManager playerManager, SpellVisualManager visualManager) {
-        super("CastTarget", "Lock in the current spell pattern");
+        super("CastTarget", "Confirm the current aim cell as a target");
         this.playerManager = playerManager;
         this.visualManager = visualManager;
     }
@@ -51,7 +52,6 @@ public class CastTargetCommand extends AbstractPlayerCommand {
             return;
         }
 
-        // Block if out of range
         if (castState.isOutOfRange()) {
             int dist = SpellPatternCalculator.getDistance(
                     castState.getCasterGridX(), castState.getCasterGridZ(),
@@ -66,79 +66,76 @@ public class CastTargetCommand extends AbstractPlayerCommand {
         SpellPattern pattern = spell.getPattern();
         int aimX = castState.getAimGridX();
         int aimZ = castState.getAimGridZ();
-        int max  = spell.getMaxTargets();
 
-        // ── Multi-target (Magic Missile etc.) ───────────────────────────────
-        // Each /CastTarget call confirms one additional cell until maxTargets is reached.
-        if (spell.isMultiTarget()) {
-            boolean added = castState.confirmTarget();
-            int confirmed = castState.getConfirmedTargetCount();
-
-            if (!added) {
-                if (confirmed >= max) {
-                    playerRef.sendMessage(Message.raw(
-                            "[Griddify] All " + max + " targets confirmed. Use /CastFinal.").color("#FFA500"));
-                } else {
-                    playerRef.sendMessage(Message.raw(
-                            "[Griddify] Already selected this cell. Walk to a different cell.").color("#FFA500"));
-                }
+        // ── CONE / LINE / WALL: snapshot the whole pattern once, ignore further calls ──
+        boolean isDirectionalPattern = pattern == SpellPattern.CONE
+                || pattern == SpellPattern.LINE
+                || pattern == SpellPattern.WALL;
+        if (isDirectionalPattern) {
+            if (castState.hasConfirmedCells()) {
+                playerRef.sendMessage(Message.raw(
+                        "[Griddify] " + spell.getName() + " already locked. Use /CastFinal to fire.").color("#FFA500"));
                 return;
             }
-
-            // Build the display set (SpellPatternCalculator.GridCell for the overlay)
-            Set<SpellPatternCalculator.GridCell> display = new java.util.HashSet<>();
-            for (SpellCastingState.GridCell c : castState.getConfirmedTargets()) {
-                display.add(new SpellPatternCalculator.GridCell(c.x, c.z));
-            }
-            display.add(new SpellPatternCalculator.GridCell(aimX, aimZ));
+            Set<SpellPatternCalculator.GridCell> cells = CastCommand.computeOverlay(
+                    pattern, castState.getDirection(),
+                    castState.getCasterGridX(), castState.getCasterGridZ(),
+                    spell, aimX, aimZ);
+            castState.setConfirmedCells(cells, aimX, aimZ);
             final float refY = castState.getCasterY();
-
-            // Snapshot into confirmedCells. setConfirmedCells resets confirmedTargets to {aimX,aimZ},
-            // so we re-populate it with all confirmed points so the staggered missile loop works.
-            castState.setConfirmedCells(display, aimX, aimZ);
-            castState.getConfirmedTargets().clear();
-            for (SpellPatternCalculator.GridCell c : castState.getConfirmedCells()) {
-                castState.getConfirmedTargets().add(new SpellCastingState.GridCell(c.x, c.z));
-            }
-
-            world.execute(() -> visualManager.showSpellArea(playerRef.getUuid(), display, world, refY));
-
-            if (confirmed >= max) {
-                playerRef.sendMessage(Message.raw(
-                        "[Griddify] All " + max + " targets confirmed! Use /CastFinal.").color("#00FF7F"));
-            } else {
-                playerRef.sendMessage(Message.raw(
-                        "[Griddify] Target " + confirmed + "/" + max
-                                + " confirmed. Walk to next target and /CastTarget again.").color("#FFD700"));
-            }
+            world.execute(() -> visualManager.showSpellArea(playerRef.getUuid(), cells, world, refY));
+            playerRef.sendMessage(Message.raw("[Griddify] " + spell.getName()
+                    + " locked — " + cells.size() + " cells. Use /CastFinal to fire.").color("#00FF7F"));
             return;
         }
 
-        // ── All other patterns: snapshot the current computed overlay ────────
-        // Compute the exact same cells that are currently highlighted (mirrors PlayerPositionTracker logic)
-        Set<SpellPatternCalculator.GridCell> cells = CastCommand.computeOverlay(
-                pattern, castState.getDirection(),
-                castState.getCasterGridX(), castState.getCasterGridZ(),
-                spell, aimX, aimZ);
+        // ── All other patterns (SINGLE_TARGET, SPHERE, CUBE, CYLINDER, MULTI) ──
+        int max = spell.getMaxTargets();
 
-        castState.setConfirmedCells(cells, aimX, aimZ);
-
-        // Keep the overlay showing the locked pattern
-        final Set<SpellPatternCalculator.GridCell> displayCells = cells;
-        final float refY = castState.getCasterY();
-        world.execute(() -> visualManager.showSpellArea(playerRef.getUuid(), displayCells, world, refY));
-
-        // Describe what was locked
-        String patternDesc;
-        switch (pattern) {
-            case CONE:  patternDesc = "cone (" + cells.size() + " cells)"; break;
-            case LINE:  patternDesc = "line (" + cells.size() + " cells)"; break;
-            case WALL:  patternDesc = "wall (" + cells.size() + " cells)"; break;
-            case SPHERE: case CUBE: case CYLINDER:
-                patternDesc = "area (" + cells.size() + " cells)"; break;
-            default:    patternDesc = "target at (" + aimX + ", " + aimZ + ")"; break;
+        // Hard cap — same for every spell (1 for Fire Bolt, 3 for Magic Missile, etc.)
+        if (castState.getConfirmedTargetCount() >= max) {
+            playerRef.sendMessage(Message.raw(
+                    "[Griddify] Already confirmed " + max + "/" + max
+                            + " targets. Use /CastFinal to fire.").color("#FFA500"));
+            return;
         }
-        playerRef.sendMessage(Message.raw("[Griddify] " + spell.getName() + " locked — "
-                + patternDesc + ". Use /CastFinal to fire.").color("#00FF7F"));
+
+        // On first confirm: freeze the overlay so it stops following player movement
+        if (!castState.hasConfirmedCells()) {
+            Set<SpellPatternCalculator.GridCell> cells = CastCommand.computeOverlay(
+                    pattern, castState.getDirection(),
+                    castState.getCasterGridX(), castState.getCasterGridZ(),
+                    spell, aimX, aimZ);
+            castState.setConfirmedCells(cells, aimX, aimZ);
+            final float refY = castState.getCasterY();
+            world.execute(() -> visualManager.showSpellArea(playerRef.getUuid(), cells, world, refY));
+        }
+
+        // Append this target (same cell allowed multiple times)
+        castState.confirmTarget();
+        int totalConfirmed = castState.getConfirmedTargetCount();
+        int hitCount = castState.getTargetCountAt(aimX, aimZ);
+
+        // Spawn a scaled Grid_Spell tile on the confirmed cell (0.2 smaller each repeat)
+        final SpellPatternCalculator.GridCell targetCell = new SpellPatternCalculator.GridCell(aimX, aimZ);
+        final float refY = castState.getCasterY();
+        final int finalHit = hitCount;
+        world.execute(() -> visualManager.addStackedSpellTile(
+                playerRef.getUuid(), targetCell, finalHit, world, refY));
+
+        // Unified feedback for all spell types
+        String hitNote = hitCount > 1
+                ? " [x" + hitCount + " on this cell, scale "
+                + String.format("%.1f", Math.max(0.2f, 1.0f - (hitCount - 1) * 0.2f)) + "]"
+                : "";
+        if (totalConfirmed >= max) {
+            playerRef.sendMessage(Message.raw(
+                    "[Griddify] " + totalConfirmed + "/" + max + " confirmed" + hitNote
+                            + " — ready! Use /CastFinal.").color("#00FF7F"));
+        } else {
+            playerRef.sendMessage(Message.raw(
+                    "[Griddify] " + totalConfirmed + "/" + max + " confirmed" + hitNote
+                            + " — walk to next target and /CastTarget, or /CastFinal now.").color("#FFD700"));
+        }
     }
 }

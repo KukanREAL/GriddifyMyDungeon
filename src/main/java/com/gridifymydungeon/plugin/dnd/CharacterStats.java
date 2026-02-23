@@ -117,6 +117,11 @@ public class CharacterStats {
     public void restoreSpellSlots() {
         usedSpellSlots = 0;
     }
+
+    /** Restore a specific number of spell slots (e.g. undo a failed cast). */
+    public void restoreSpellSlot(int cost) {
+        usedSpellSlots = Math.max(0, usedSpellSlots - cost);
+    }
     // Add this static method at the bottom
     /**
      * Format stat with modifier for display

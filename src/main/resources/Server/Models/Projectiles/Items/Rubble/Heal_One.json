@@ -1,6 +1,6 @@
 {
-  "Model": "Items/Fire_Bolt.blockymodel",
-  "Texture": "Items/Magic_Spell.png",
+  "Model": "Items/Empty.blockymodel",
+  "Texture": "Items/Empty.png",
   "HitBox": {
     "Max": {
       "X": 0.15,
@@ -15,19 +15,12 @@
   },
   "MinScale": 1,
   "MaxScale": 1,
-  "Trails": [
-    {}
-  ],
   "Particles": [
     {
-      "SystemId": "Test_Beam",
-      "Scale": 0.2,
-      "PositionOffset": {
-        "Z": -0.35,
-        "X": 0
-      },
+      "SystemId": "Totem_Heal_AttachOnStatue",
+      "Scale": 1,
       "RotationOffset": {
-        "Yaw": 270
+        "Pitch": 180
       }
     }
   ]

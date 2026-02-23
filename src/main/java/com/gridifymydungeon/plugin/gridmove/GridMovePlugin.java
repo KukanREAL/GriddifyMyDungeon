@@ -193,11 +193,18 @@ public class GridMovePlugin extends JavaPlugin {
 
         // Spell casting commands
         PersistentSpellManager persistentSpellManager = new PersistentSpellManager();
+        com.gridifymydungeon.plugin.spell.WildShapeManager wildShapeManager =
+                new com.gridifymydungeon.plugin.spell.WildShapeManager(gridMoveManager);
+        com.gridifymydungeon.plugin.spell.PolymorphManager polymorphManager =
+                new com.gridifymydungeon.plugin.spell.PolymorphManager(gridMoveManager, encounterManager);
         getCommandRegistry().registerCommand(new ListSpellsCommand(gridMoveManager, roleManager, encounterManager));
         getCommandRegistry().registerCommand(new CastCommand(gridMoveManager, encounterManager, spellVisualManager, roleManager, collisionDetector));
         getCommandRegistry().registerCommand(new CastTargetCommand(gridMoveManager, spellVisualManager));
-        getCommandRegistry().registerCommand(new CastFinalCommand(gridMoveManager, encounterManager, spellVisualManager, combatSettings, roleManager));
+        getCommandRegistry().registerCommand(new CastFinalCommand(gridMoveManager, encounterManager, spellVisualManager, combatSettings, roleManager, wildShapeManager, polymorphManager));
         getCommandRegistry().registerCommand(new CastCancelCommand(gridMoveManager, spellVisualManager, encounterManager, roleManager));
+        getCommandRegistry().registerCommand(new com.gridifymydungeon.plugin.spell.OrbCommand(gridMoveManager));
+        getCommandRegistry().registerCommand(new com.gridifymydungeon.plugin.spell.PolyformCommand(gridMoveManager, encounterManager, polymorphManager));
+        getCommandRegistry().registerCommand(new com.gridifymydungeon.plugin.spell.PolyrevertCommand(encounterManager, polymorphManager));
 
         // Help command
         getCommandRegistry().registerCommand(new GridHelpCommand(roleManager));
