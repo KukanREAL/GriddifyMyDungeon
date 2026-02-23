@@ -36,7 +36,36 @@ public enum ProjectileType {
     CONE_OF_COLD         ("Frost_Bolt",     null, 1.3f, "IceBall",           0.5f),
 
     // ── ICE_STORM falling bolts (spawned by SpellVisualEffect, not projectile) ─
-    ICE_STORM_BOLT       ("Frost_Bolt",     null, 0.9f, null,                0f);
+    ICE_STORM_BOLT       ("Frost_Bolt",     null, 0.9f, null,                0f),
+
+    // ── LINE spells ──────────────────────────────────────────────────────────
+    LIGHTNING_BOLT       ("Lightning_Bolt", null, 1.4f, "Explosion_Big",     0.7f),
+    LIGHTNING_ARROW      ("Lightning_Bolt", null, 1.0f, "Explosion_Big",     0.5f),
+    CHAIN_LIGHTNING      ("Lightning_Bolt", null, 1.0f, "Explosion_Big",     0.5f),
+
+    // ── SPHERE spells ─────────────────────────────────────────────────────────
+    SHATTER              ("Thunder_Bolt",   null, 2.2f, "Explosion_Big",     0.9f),
+    MASS_PSYCHIC_BLAST   ("Arcane_Bolt",    null, 2.5f, "Explosion_Big",     1.0f),
+    DELAYED_BLAST_FIREBALL("Fire_Bolt",     null, 3.0f, "Explosion_Big",     1.5f),
+    METEOR_SWARM         ("Fire_Bolt",      null, 4.0f, "Explosion_Big",     2.0f),
+
+    // ── Radiant single-target ─────────────────────────────────────────────────
+    SACRED_FLAME         ("Arcane_Bolt",    null, 1.0f, "Sparkle_Explosion", 0.5f),
+    DIVINE_SMITE         ("Arcane_Bolt",    null, 1.2f, "Sparkle_Explosion", 0.6f),
+    SPIRITUAL_WEAPON     ("Arcane_Bolt",    null, 1.3f, "Sparkle_Explosion", 0.5f),
+    RADIANT_SUN_BOLT     ("Arcane_Bolt",    null, 1.1f, "Sparkle_Explosion", 0.5f),
+    PRISMATIC_SPRAY      ("Arcane_Bolt",    null, 2.0f, "Explosion_Big",     1.0f),
+
+    // ── Arcane single-target ──────────────────────────────────────────────────
+    ELDRITCH_BLAST       ("Arcane_Bolt",    null, 1.2f, "Explosion_Big",     0.5f),
+    CHAOS_BOLT           ("Arcane_Bolt",    null, 1.1f, "Explosion_Big",     0.5f),
+    ARCANE_PULSE         ("Arcane_Bolt",    null, 1.0f, "Sparkle_Explosion", 0.4f),
+
+    // ── Melee flash (instant, near-zero travel) ───────────────────────────────
+    MELEE_FLASH          ("Arcane_Bolt",    null, 0.7f, "Sparkle_Explosion", 0.3f),
+
+    // ── Cone variants ────────────────────────────────────────────────────────
+    ARCANE_CONE          ("Arcane_Bolt",    null, 0.9f, "Sparkle_Explosion", 0.3f);
 
     // ────────────────────────────────────────────────────────────────────────
 
@@ -58,22 +87,90 @@ public enum ProjectileType {
     @Nullable
     public static ProjectileType forSpell(String spellName) {
         if (spellName == null) return null;
-        switch (spellName.toLowerCase().replace(" ", "_").replace("-", "_")) {
+        switch (spellName.toLowerCase().replace(" ", "_").replace("-", "_").replace("'", "")) {
+
+            // ── Fire ────────────────────────────────────────────────────────
             case "fire_bolt":
-            case "twinned_fire_bolt":         return FIRE_BOLT;
-            case "produce_flame":             return PRODUCE_FLAME;
-            case "magic_missile":             return MAGIC_MISSILE;
-            case "arcane_barrage":            return ARCANE_BARRAGE;
-            case "fireball":                  return FIREBALL;
-            case "quickened_fireball":        return QUICKENED_FIREBALL;
-            case "burning_hands":             return BURNING_HANDS;
+            case "twinned_fire_bolt":            return FIRE_BOLT;
+            case "produce_flame":                return PRODUCE_FLAME;
+            case "fireball":
+            case "careful_fireball":             return FIREBALL;
+            case "quickened_fireball":           return QUICKENED_FIREBALL;
+            case "delayed_blast_fireball":       return DELAYED_BLAST_FIREBALL;
+            case "meteor_swarm":                 return METEOR_SWARM;
+            case "burning_hands":                return BURNING_HANDS;
+
+            // ── Frost ───────────────────────────────────────────────────────
             case "cone_of_cold":
             case "dragonfrost_breath":
-            case "dragonfrost_claw":          return CONE_OF_COLD;
-            // Ice_Storm and Chromatic_Orb are NOT returned here —
-            // Ice_Storm uses SpellVisualEffect.spawnIceStorm(),
-            // Chromatic_Orb uses forElement() below.
-            default:                          return null;
+            case "dragonfrost_claw":             return CONE_OF_COLD;
+
+            // ── Lightning ───────────────────────────────────────────────────
+            case "lightning_bolt":
+            case "empowered_lightning_bolt":     return LIGHTNING_BOLT;
+            case "lightning_arrow":              return LIGHTNING_ARROW;
+            case "chain_lightning":              return CHAIN_LIGHTNING;
+
+            // ── Thunder ─────────────────────────────────────────────────────
+            case "shatter":                      return SHATTER;
+
+            // ── Arcane ──────────────────────────────────────────────────────
+            case "magic_missile":                return MAGIC_MISSILE;
+            case "arcane_barrage":               return ARCANE_BARRAGE;
+            case "chaos_bolt":                   return CHAOS_BOLT;
+            case "mass_psychic_blast":           return MASS_PSYCHIC_BLAST;
+            case "eldritch_blast":               return ELDRITCH_BLAST;
+            case "counterspell":
+            case "dispel_magic":
+            case "banishment":
+            case "projected_ward":               return ARCANE_PULSE;
+            case "globe_of_invulnerability":
+            case "explosive_runes":              return ARCANE_PULSE;
+
+            // ── Radiant ─────────────────────────────────────────────────────
+            case "sacred_flame":                 return SACRED_FLAME;
+            case "divine_smite":                 return DIVINE_SMITE;
+            case "spiritual_weapon":             return SPIRITUAL_WEAPON;
+            case "divine_strike":                return DIVINE_SMITE;
+            case "radiant_sun_bolt":             return RADIANT_SUN_BOLT;
+            case "prismatic_spray":              return PRISMATIC_SPRAY;
+
+            // ── Melee flash (no actual projectile, just impact flash) ────────
+            case "power_strike":
+            case "cleave":
+            case "whirlwind_attack":
+            case "execute":
+            case "flurry_of_blows":
+            case "quivering_palm":
+            case "stunning_strike":
+            case "sneak_attack":
+            case "divine_smite_melee":           return MELEE_FLASH;
+
+            // ── Melee cone ──────────────────────────────────────────────────
+            case "battle_cry":
+            case "detect_thoughts":              return ARCANE_CONE;
+
+            // ── Utility / buff (no projectile) ──────────────────────────────
+            // These are handled by effect-only logic in CastFinalCommand;
+            // returning null keeps them out of the projectile path.
+            case "hex":
+            case "hunters_mark":
+            case "bless":
+            case "bardic_inspiration":
+            case "vicious_mockery":
+            case "power_word_stun":
+            case "hail_of_thorns":
+            case "foresight":
+            case "true_seeing":
+            case "scrying":
+            case "lay_on_hands":
+            case "cure_wounds":
+            case "heal":
+            case "mass_cure_wounds":
+                return null; // heals handled separately
+
+            // ── Ice_Storm / Chromatic_Orb handled elsewhere ─────────────────
+            default:                             return null;
         }
     }
 

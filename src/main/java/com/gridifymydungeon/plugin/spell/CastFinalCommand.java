@@ -373,17 +373,37 @@ public class CastFinalCommand extends AbstractPlayerCommand {
                             world.execute(() -> launchConeProjectiles(
                                     finalType, world, finalCastState, finalCells, npcYFinal, allPlayers));
 
-                        } else if (projPattern == SpellPattern.SPHERE
-                                && (spellKey.equals("fireball") || spellKey.equals("quickened_fireball"))) {
+                        } else if (projPattern == SpellPattern.LINE) {
+                            world.execute(() -> launchLineProjectiles(
+                                    finalType, world, finalCastState, finalCells, npcYFinal, allPlayers));
+
+                        } else if (projPattern == SpellPattern.CHAIN) {
+                            java.util.List<SpellCastingState.GridCell> targets =
+                                    new java.util.ArrayList<>(castState.getConfirmedTargets());
+                            if (targets.isEmpty())
+                                targets.add(new SpellCastingState.GridCell(aimGridX, aimGridZ));
+                            world.execute(() -> launchChainProjectile(
+                                    finalType, world, finalCastState, targets, npcYFinal, allPlayers));
+
+                        } else if (projPattern == SpellPattern.SPHERE) {
+                            // All sphere spells get a fireball-style impact
                             java.util.List<SpellCastingState.GridCell> targets =
                                     new java.util.ArrayList<>(castState.getConfirmedTargets());
                             if (targets.isEmpty())
                                 targets.add(new SpellCastingState.GridCell(aimGridX, aimGridZ));
                             final SpellCastingState.GridCell tc = targets.get(0);
+                            // Scale lingering effect: big spells get bigger/longer explosion
+                            float lingerScale = 1.5f;
+                            long lingerMs = 800L;
+                            if (spellKey.equals("meteor_swarm")) { lingerScale = 3.5f; lingerMs = 2000L; }
+                            else if (spellKey.equals("delayed_blast_fireball")) { lingerScale = 2.5f; lingerMs = 1500L; }
+                            else if (spellKey.equals("mass_psychic_blast")) { lingerScale = 2.0f; lingerMs = 900L; }
+                            final float fScale = lingerScale; final long fLinger = lingerMs;
                             world.execute(() -> launchFireballProjectile(
-                                    finalType, world, finalCastState, tc.x, tc.z, npcYFinal, allPlayers));
+                                    finalType, world, finalCastState, tc.x, tc.z, npcYFinal, allPlayers, fScale, fLinger));
 
                         } else {
+                            // SINGLE_TARGET — stagger multiple targets by 120ms each
                             java.util.List<SpellCastingState.GridCell> targets =
                                     new java.util.ArrayList<>(castState.getConfirmedTargets());
                             if (targets.isEmpty())
@@ -454,6 +474,35 @@ public class CastFinalCommand extends AbstractPlayerCommand {
                         case "ice_storm": {
                             world.execute(() -> SpellVisualEffect.spawnIceStorm(
                                     world, finalCells, npcYFinal, allPlayers));
+                            break;
+                        }
+                        case "call_lightning": {
+                            // Repeated lightning strikes at target area over 3 seconds
+                            SpellCastingState.GridCell tc = castState.getConfirmedTargets().isEmpty()
+                                    ? new SpellCastingState.GridCell(aimGridX, aimGridZ)
+                                    : castState.getConfirmedTargets().get(0);
+                            final int cx = tc.x, cz = tc.z;
+                            for (int strike = 0; strike < 4; strike++) {
+                                final long delay = strike * 750L;
+                                PROJ_SCHEDULER.schedule(() -> world.execute(() -> {
+                                    float wx = (cx * 2.0f) + 1.0f;
+                                    float wz = (cz * 2.0f) + 1.0f;
+                                    Float gy = SpellVisualManager.scanForGround(world, cx, cz, npcYFinal + 30f, 45);
+                                    float wy = (gy != null ? gy : npcYFinal) + 0.5f;
+                                    SpellVisualEffect.spawnWithTimeout("Lightning_Bolt", 1.0f, world, wx, wy + 8f, wz, 0f, 50L);
+                                    SpellVisualEffect.spawnWithTimeout("Explosion", 1.0f, world, wx, wy, wz, 0f, 400L);
+                                }), delay, java.util.concurrent.TimeUnit.MILLISECONDS);
+                            }
+                            break;
+                        }
+                        case "spirit_guardians": {
+                            // Orbiting radiant flash around the caster
+                            float ox2 = (castState.getCasterGridX() * 2.0f) + 1.0f;
+                            float oz2 = (castState.getCasterGridZ() * 2.0f) + 1.0f;
+                            Float gy2 = SpellVisualManager.scanForGround(world, castState.getCasterGridX(), castState.getCasterGridZ(), npcYFinal + 30f, 45);
+                            float wy2 = (gy2 != null ? gy2 : npcYFinal) + 1.0f;
+                            final float fOx = ox2, fWy = wy2, fOz = oz2;
+                            world.execute(() -> SpellVisualEffect.spawnWithTimeout("Moon_Beam", 2.0f, world, fOx, fWy, fOz, 0f, 2000L));
                             break;
                         }
                     }
@@ -607,16 +656,21 @@ public class CastFinalCommand extends AbstractPlayerCommand {
     }
 
     /**
-     * Fireball: one large projectile that — on arrival — spawns a Moon_Beam for 1 second.
-     * SpellProjectile.launch returns the Ref; we use a callback via a custom overload
-     * that runs arrivalCallback instead of just despawning.
-     * Since SpellProjectile doesn't support callbacks yet, we schedule the Moon_Beam
-     * based on travel-time estimate (dist / velocity) + 200ms padding.
+     * Fireball / Sphere spells: one projectile → impact explosion lingers.
+     * lingerScale and lingerMs control the explosion size and duration.
      */
     private void launchFireballProjectile(ProjectileType type, World world,
                                           SpellCastingState castState,
                                           int targetGridX, int targetGridZ,
                                           float npcY, List<PlayerRef> players) {
+        launchFireballProjectile(type, world, castState, targetGridX, targetGridZ, npcY, players, 1.5f, 1000L);
+    }
+
+    private void launchFireballProjectile(ProjectileType type, World world,
+                                          SpellCastingState castState,
+                                          int targetGridX, int targetGridZ,
+                                          float npcY, List<PlayerRef> players,
+                                          float lingerScale, long lingerMs) {
         float ox = (castState.getCasterGridX() * 2.0f) + 1.0f;
         float oy = npcY + 1.2f;
         float oz = (castState.getCasterGridZ() * 2.0f) + 1.0f;
@@ -626,17 +680,103 @@ public class CastFinalCommand extends AbstractPlayerCommand {
         float ty = (groundY != null ? groundY : npcY) + 1.2f;
 
         double dist = Math.sqrt(Math.pow(tx - ox, 2) + Math.pow(tz - oz, 2));
-        // MUZZLE_VELOCITY is 12 world units/s; estimate travel time + buffer
         long travelMs = (long)(dist / 12.0 * 1000) + 150;
 
         SpellProjectile.launch(type, world, new Vector3d(ox, oy, oz), new Vector3d(tx, ty, tz), players);
 
-        // Schedule Moon_Beam at target for 1 second after projectile arrives
         final double ftx = tx, fty = ty, ftz = tz;
+        final float fScale = lingerScale;
+        final long fLinger = lingerMs;
         PROJ_SCHEDULER.schedule(() -> world.execute(() ->
                         SpellVisualEffect.spawnWithTimeout(
-                                "Moon_Beam", 1.5f, world, ftx, fty, ftz, 0f, 1000L)),
+                                "Moon_Beam", fScale, world, ftx, fty, ftz, 0f, fLinger)),
                 travelMs, java.util.concurrent.TimeUnit.MILLISECONDS);
+    }
+
+    /**
+     * LINE spells (Lightning_Bolt, Lightning_Arrow, Empowered_Lightning_Bolt, Devastating_Charge):
+     * Fire BOLT_COUNT projectiles distributed across the cells of the line.
+     */
+    private static final int LINE_PROJECTILE_COUNT = 8;
+
+    private void launchLineProjectiles(ProjectileType type, World world,
+                                       SpellCastingState castState,
+                                       Set<SpellPatternCalculator.GridCell> cells,
+                                       float npcY, List<PlayerRef> players) {
+        if (cells.isEmpty()) return;
+        float ox = (castState.getCasterGridX() * 2.0f) + 1.0f;
+        float oy = npcY + 1.2f;
+        float oz = (castState.getCasterGridZ() * 2.0f) + 1.0f;
+
+        // Sort cells by distance from caster so bolts travel along the line in order
+        java.util.List<SpellPatternCalculator.GridCell> sorted = new java.util.ArrayList<>(cells);
+        sorted.sort(java.util.Comparator.comparingDouble(c ->
+                Math.sqrt(Math.pow(c.x - castState.getCasterGridX(), 2)
+                        + Math.pow(c.z - castState.getCasterGridZ(), 2))));
+
+        for (int i = 0; i < LINE_PROJECTILE_COUNT; i++) {
+            SpellPatternCalculator.GridCell cell = sorted.get(i % sorted.size());
+            Float groundY = SpellVisualManager.scanForGround(world, cell.x, cell.z, npcY + 30f, 45);
+            double ty = (groundY != null ? groundY : npcY) + 1.2;
+            double jx = (Math.random() - 0.5) * 0.6;
+            double jz = (Math.random() - 0.5) * 0.6;
+            final double tx = (cell.x * 2.0) + 1.0 + jx;
+            final double fty = ty;
+            final double tz = (cell.z * 2.0) + 1.0 + jz;
+            final long delay = i * 40L; // stagger 40ms between bolts
+            if (delay == 0) {
+                SpellProjectile.launch(type, world, new Vector3d(ox, oy, oz), new Vector3d(tx, fty, tz), players);
+            } else {
+                PROJ_SCHEDULER.schedule(() -> world.execute(() ->
+                                SpellProjectile.launch(type, world, new Vector3d(ox, oy, oz),
+                                        new Vector3d(tx, fty, tz), players)),
+                        delay, java.util.concurrent.TimeUnit.MILLISECONDS);
+            }
+        }
+    }
+
+    /**
+     * CHAIN spells (Chaos_Bolt, Chain_Lightning):
+     * Primary bolt to first target, then chain to adjacent targets with 200ms gaps.
+     */
+    private void launchChainProjectile(ProjectileType type, World world,
+                                       SpellCastingState castState,
+                                       java.util.List<SpellCastingState.GridCell> targets,
+                                       float npcY, List<PlayerRef> players) {
+        if (targets.isEmpty()) return;
+
+        // First bolt from caster
+        float ox = (castState.getCasterGridX() * 2.0f) + 1.0f;
+        float oy = npcY + 1.2f;
+        float oz = (castState.getCasterGridZ() * 2.0f) + 1.0f;
+
+        SpellCastingState.GridCell first = targets.get(0);
+        Float gy = SpellVisualManager.scanForGround(world, first.x, first.z, npcY + 30f, 45);
+        double ty = (gy != null ? gy : npcY) + 1.2;
+        double tx = (first.x * 2.0) + 1.0;
+        double tz = (first.z * 2.0) + 1.0;
+
+        SpellProjectile.launch(type, world, new Vector3d(ox, oy, oz), new Vector3d(tx, ty, tz), players);
+
+        // Estimate travel time for chain delay
+        double dist = Math.sqrt(Math.pow(tx - ox, 2) + Math.pow(tz - oz, 2));
+        long chainDelay = (long)(dist / 12.0 * 1000) + 100;
+
+        // Chain bolts between subsequent targets
+        for (int i = 1; i < targets.size() && i <= 6; i++) {
+            SpellCastingState.GridCell prev = targets.get(i - 1);
+            SpellCastingState.GridCell curr = targets.get(i);
+            final long delay = chainDelay + (i - 1) * 200L;
+            final double prevX = (prev.x * 2.0) + 1.0, prevY = ty, prevZ = (prev.z * 2.0) + 1.0;
+            Float cgy = SpellVisualManager.scanForGround(world, curr.x, curr.z, npcY + 30f, 45);
+            final double cty = (cgy != null ? cgy : npcY) + 1.2;
+            final double ctx = (curr.x * 2.0) + 1.0, ctz = (curr.z * 2.0) + 1.0;
+            PROJ_SCHEDULER.schedule(() -> world.execute(() ->
+                            SpellProjectile.launch(type, world,
+                                    new Vector3d(prevX, prevY, prevZ),
+                                    new Vector3d(ctx, cty, ctz), players)),
+                    delay, java.util.concurrent.TimeUnit.MILLISECONDS);
+        }
     }
 
     /** Convert Direction8 to yaw radians for entity orientation. */

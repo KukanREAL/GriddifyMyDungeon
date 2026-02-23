@@ -36,7 +36,7 @@ import java.util.concurrent.TimeUnit;
  *   spawnStationary  – spawn one entity at a fixed position (Moonbeam, Sunbeam)
  *   spawnGrowing     – entity grows from scale 0→target over durationMs (Entangle per cell)
  *   spawnWave        – sweeping row-by-row wave of entities then despawn (Thunderwave)
- *   spawnWithTimeout – spawn then auto-despawn after ms (Fireball lingering Moonbeam)
+ *   spawnWithTimeout – spawn then auto-despawn after ms (Fireball lingering Explosion)
  */
 public class SpellVisualEffect {
 

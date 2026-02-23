@@ -1,0 +1,45 @@
+{
+  "Model": "Items/Fire_Bolt.blockymodel",
+  "Texture": "Items/Crimson_Spell.png",
+  "HitBox": {
+    "Max": {
+      "X": 0.15,
+      "Y": 0.15,
+      "Z": 0.15
+    },
+    "Min": {
+      "X": -0.15,
+      "Y": -0.15,
+      "Z": -0.15
+    }
+  },
+  "MinScale": 1,
+  "MaxScale": 1,
+  "Trails": [
+    {
+      "TrailId": {
+        "TexturePath": "Trails/Charged_Black.png",
+        "LifeSpan": 15,
+        "Roll": 90,
+        "Start": {
+          "Width": 0.2,
+          "Color": "#000000ff"
+        },
+        "End": {
+          "Width": 0.03,
+          "Color": "#a90000ff"
+        },
+        "RenderMode": "Erosion"
+      }
+    }
+  ],
+  "Particles": [
+    {
+      "SystemId": "Projectile_Fire_Static_Dark",
+      "Scale": 2,
+      "PositionOffset": {
+        "Y": -0.2
+      }
+    }
+  ]
+}
