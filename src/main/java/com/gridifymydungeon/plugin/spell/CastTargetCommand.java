@@ -100,8 +100,10 @@ public class CastTargetCommand extends AbstractPlayerCommand {
             return;
         }
 
-        // On first confirm: freeze the overlay so it stops following player movement
-        if (!castState.hasConfirmedCells()) {
+        // Always recompute cells from current aim position — overlay updates each /CastTarget.
+        // This lets the player walk to a different cell and call /CastTarget there again.
+        // Confirmed targets accumulate across calls; the overlay shows the CURRENT aim cell.
+        {
             Set<SpellPatternCalculator.GridCell> cells = CastCommand.computeOverlay(
                     pattern, castState.getDirection(),
                     castState.getCasterGridX(), castState.getCasterGridZ(),

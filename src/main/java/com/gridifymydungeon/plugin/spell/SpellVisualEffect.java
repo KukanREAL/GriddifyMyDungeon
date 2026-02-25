@@ -117,12 +117,17 @@ public class SpellVisualEffect {
     }
 
     /**
-     * Thunderwave: launch 3 waves outward from caster across the spell cells.
-     * Cells are grouped into rows by distance from caster; each row appears then
-     * the next row appears 200 ms later. All entities despawn after the last wave.
+     * Thunderwave: 3 directional sweeps of 6 entities each, moving from one edge
+     * of the spell area to the other.
      *
-     * Must be called inside world.execute() for the first spawn; subsequent ones
-     * are scheduled.
+     * The spell pattern is sorted by distance from caster; we treat the sorted order
+     * as the "near → far" axis.  Each of the 3 waves is a full row of 6 entities that
+     * appears, travels one step forward, then the next wave follows, etc.
+     *
+     * Animation: each entity in a wave spawns, lingers 180 ms, then despawns so the
+     * visual illusion of movement crosses the spell area in ~540 ms per wave.
+     * Three complete passes run back-to-back (waves 2 and 3 start after the previous
+     * wave has finished).
      */
     public static void spawnWave(String modelAssetId, float entityScale,
                                  World world,
@@ -131,37 +136,73 @@ public class SpellVisualEffect {
                                  List<PlayerRef> ignoredPlayers) {
         if (cells.isEmpty()) return;
 
-        // Group cells by Chebyshev distance from caster
+        // Group cells by Chebyshev distance from caster — each distance ring is one "column"
         java.util.TreeMap<Integer, List<SpellPatternCalculator.GridCell>> byDist = new java.util.TreeMap<>();
         for (SpellPatternCalculator.GridCell c : cells) {
             int d = SpellPatternCalculator.getDistance(casterGridX, casterGridZ, c.x, c.z);
             byDist.computeIfAbsent(d, k -> new ArrayList<>()).add(c);
         }
+        List<List<SpellPatternCalculator.GridCell>> columns = new ArrayList<>(byDist.values());
+        if (columns.isEmpty()) return;
 
-        List<List<SpellPatternCalculator.GridCell>> waves = new ArrayList<>(byDist.values());
-        List<Ref<EntityStore>> allRefs = new java.util.concurrent.CopyOnWriteArrayList<>();
-        long waveDelay = 180L; // ms between each wave ring appearing
+        int numCols     = columns.size();
+        long colStepMs  = 150L;   // time between each column appearing in one sweep
+        long waveLinger = 180L;   // how long each entity stays visible
+        long sweepDur   = numCols * colStepMs + waveLinger;
+        int  numSweeps  = 3;
 
-        for (int wi = 0; wi < waves.size(); wi++) {
-            final List<SpellPatternCalculator.GridCell> wave = waves.get(wi);
-            final long delay = wi * waveDelay;
-            SCHED.schedule(() -> world.execute(() -> {
-                for (SpellPatternCalculator.GridCell c : wave) {
-                    float wx = (c.x * 2.0f) + 1.0f;
-                    float wz = (c.z * 2.0f) + 1.0f;
-                    Float groundY = SpellVisualManager.scanForGround(world, c.x, c.z, npcY + 30f, 45);
-                    float wy = (groundY != null ? groundY : npcY) + 0.5f;
-                    Ref<EntityStore> ref = spawnStationary(modelAssetId, entityScale, world, wx, wy, wz, 0f);
-                    if (ref != null) allRefs.add(ref);
-                }
-            }), delay, TimeUnit.MILLISECONDS);
+        for (int sweep = 0; sweep < numSweeps; sweep++) {
+            long sweepStart = sweep * (sweepDur + 60L); // 60 ms gap between sweeps
+
+            for (int ci = 0; ci < numCols; ci++) {
+                final List<SpellPatternCalculator.GridCell> col = columns.get(ci);
+                final long showAt   = sweepStart + ci * colStepMs;
+                final long hideAt   = showAt + waveLinger;
+
+                SCHED.schedule(() -> world.execute(() -> {
+                    List<Ref<EntityStore>> colRefs = new ArrayList<>();
+                    for (SpellPatternCalculator.GridCell c : col) {
+                        float wx = (c.x * 2.0f) + 1.0f;
+                        float wz = (c.z * 2.0f) + 1.0f;
+                        Float groundY = SpellVisualManager.scanForGround(world, c.x, c.z, npcY + 30f, 45);
+                        float wy = (groundY != null ? groundY : npcY) + 0.5f;
+                        Ref<EntityStore> ref = spawnStationary(modelAssetId, entityScale, world, wx, wy, wz, 0f);
+                        if (ref != null) colRefs.add(ref);
+                    }
+                    // Schedule despawn for this column's entities
+                    SCHED.schedule(() -> world.execute(() -> {
+                        for (Ref<EntityStore> r : colRefs) despawn(world, r);
+                    }), waveLinger, TimeUnit.MILLISECONDS);
+                }), showAt, TimeUnit.MILLISECONDS);
+            }
         }
+    }
 
-        // Despawn everything after all waves + 600ms linger
-        long totalLife = waves.size() * waveDelay + 600L;
-        SCHED.schedule(() -> world.execute(() -> {
-            for (Ref<EntityStore> r : allRefs) despawn(world, r);
-        }), totalLife, TimeUnit.MILLISECONDS);
+    /**
+     * Entangle: spawn 4 Entangle entities per grid cell in the affected area,
+     * offset at the 4 block corners (+/-0.5, +/-0.5) within the 2×2 grid cell.
+     * Each grows from scale 0→entityScale over growMs.
+     * Returns a list of all spawned refs so they can be tracked for despawn.
+     */
+    public static List<Ref<EntityStore>> spawnEntangle(World world,
+                                                       Set<SpellPatternCalculator.GridCell> cells,
+                                                       float npcY) {
+        List<Ref<EntityStore>> refs = new java.util.concurrent.CopyOnWriteArrayList<>();
+        float[] offsets = {-0.5f, 0.5f};
+        for (SpellPatternCalculator.GridCell c : cells) {
+            Float groundY = SpellVisualManager.scanForGround(world, c.x, c.z, npcY + 30f, 45);
+            float wy = groundY != null ? groundY : npcY;
+            float cx = (c.x * 2.0f) + 1.0f;
+            float cz = (c.z * 2.0f) + 1.0f;
+            for (float ox : offsets) {
+                for (float oz : offsets) {
+                    final float fx = cx + ox, fy = wy, fz = cz + oz;
+                    Ref<EntityStore> ref = spawnGrowing("Entangle", 0.7f, world, fx, fy, fz, 400L);
+                    if (ref != null) refs.add(ref);
+                }
+            }
+        }
+        return refs;
     }
 
 
@@ -261,6 +302,18 @@ public class SpellVisualEffect {
         }
     }
 
+
+    /**
+     * Mark: spawn a Mark entity flat on the ground at the given grid cell for lifetimeMs.
+     * Used for buff spells (Bardic Inspiration, Hex, Bless, etc.) and teleport destinations.
+     */
+    public static void spawnMark(World world, int gridX, int gridZ, float npcY, long lifetimeMs) {
+        Float groundY = SpellVisualManager.scanForGround(world, gridX, gridZ, npcY + 30f, 45);
+        float wy = groundY != null ? groundY + 0.05f : npcY + 0.05f;
+        float wx = (gridX * 2.0f) + 1.0f;
+        float wz = (gridZ * 2.0f) + 1.0f;
+        spawnWithTimeout("Mark", 1.0f, world, wx, wy, wz, 0f, lifetimeMs);
+    }
     public static void despawn(World world, @Nullable Ref<EntityStore> ref) {
         if (ref == null || !ref.isValid()) return;
         try { world.getEntityStore().getStore().removeEntity(ref, RemoveReason.REMOVE); }

@@ -5,7 +5,7 @@ import com.gridifymydungeon.plugin.spell.SubclassType;
 
 /**
  * Character encoding/decoding with CLASS SUPPORT
- * FORMAT: AABBCC-DEF-GH-IJK (15 characters)
+ * FORMAT: AABBCC-DEF-GH-HIJKL (19 chars with dashes, 16 clean chars)
  *
  * AA: STR+DEX packed (stat1*31 + stat2)
  * BB: CON+INT packed
@@ -99,8 +99,8 @@ public class CharacterCodec {
         // Remove any whitespace/dashes for validation
         String clean = code.replace("-", "").trim();
 
-        // Support both 11-char (old) and 15-char (new) codes
-        if (clean.length() != 11 && clean.length() != 15) {
+        // Support both 11-char (old, no class) and 16-char (new, with class/level/subclass)
+        if (clean.length() != 11 && clean.length() != 16) {
             return null;
         }
 
@@ -194,7 +194,7 @@ public class CharacterCodec {
                 stats.wisdom >= 0 && stats.wisdom <= 30 &&
                 stats.charisma >= 0 && stats.charisma <= 30 &&
                 stats.maxHP >= 1 && stats.maxHP <= 999 &&
-                stats.armor >= 1 && stats.armor <= 50 &&
+                stats.armor >= 0 && stats.armor <= 50 &&
                 stats.initiative >= -10 && stats.initiative <= 10 &&
                 stats.getLevel() >= 1 && stats.getLevel() <= 20 &&
                 stats.getSpellSlots() >= 0 && stats.getSpellSlots() <= 3843; // 62*62 - 1
@@ -208,7 +208,7 @@ public class CharacterCodec {
                 stats.wisdom >= 0 && stats.wisdom <= 30 &&
                 stats.charisma >= 0 && stats.charisma <= 30 &&
                 stats.hp >= 1 && stats.hp <= 999 &&
-                stats.armor >= 1 && stats.armor <= 50 &&
+                stats.armor >= 0 && stats.armor <= 50 &&
                 stats.initiative >= -10 && stats.initiative <= 10 &&
                 stats.level >= 1 && stats.level <= 20 &&
                 stats.spellSlots >= 0 && stats.spellSlots <= 3843;
@@ -258,7 +258,7 @@ public class CharacterCodec {
             stats.charisma = this.charisma;
             stats.maxHP = this.hp;
             stats.currentHP = this.hp;
-            stats.armor = this.armor;
+            stats.armor = this.armor > 0 ? this.armor : 10;
             stats.initiative = this.initiative;
             stats.flying = this.flying;
             stats.setLevel(this.level);

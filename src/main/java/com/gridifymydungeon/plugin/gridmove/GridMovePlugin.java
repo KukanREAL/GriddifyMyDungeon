@@ -16,6 +16,8 @@ import com.hypixel.hytale.server.core.io.handlers.game.GamePacketHandler;
 import com.hypixel.hytale.server.core.plugin.JavaPlugin;
 import com.hypixel.hytale.server.core.plugin.JavaPluginInit;
 
+import com.gridifymydungeon.plugin.debug.GridDebugCommand;
+import com.gridifymydungeon.plugin.gridmove.commands.GridWeatherCommand;
 import javax.annotation.Nonnull;
 import java.util.logging.Level;
 
@@ -207,6 +209,8 @@ public class GridMovePlugin extends JavaPlugin {
         getCommandRegistry().registerCommand(new com.gridifymydungeon.plugin.spell.PolyrevertCommand(encounterManager, polymorphManager));
 
         // Help command
+        getCommandRegistry().registerCommand(new GridWeatherCommand(roleManager));
+        getCommandRegistry().registerCommand(new GridDebugCommand());
         getCommandRegistry().registerCommand(new GridHelpCommand(roleManager));
 
         getLogger().at(Level.INFO).log("Registered all commands successfully!");

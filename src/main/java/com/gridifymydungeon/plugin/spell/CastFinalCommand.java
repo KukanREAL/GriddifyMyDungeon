@@ -6,6 +6,7 @@ import com.gridifymydungeon.plugin.dnd.MonsterState;
 import com.gridifymydungeon.plugin.dnd.RoleManager;
 import com.gridifymydungeon.plugin.gridmove.GridMoveManager;
 import com.gridifymydungeon.plugin.gridmove.GridPlayerState;
+import com.gridifymydungeon.plugin.gridmove.TerrainManager;
 import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.component.Store;
 import com.hypixel.hytale.math.vector.Vector3d;
@@ -427,14 +428,20 @@ public class CastFinalCommand extends AbstractPlayerCommand {
                     // ── STATIONARY / WAVE / RAIN effects ─────────────────────
                     switch (spellKey) {
                         case "entangle": {
+                            // Spawn 4 Entangle entities per grid cell (4 block corners)
+                            java.util.List<com.hypixel.hytale.component.Ref<com.hypixel.hytale.server.core.universe.world.storage.EntityStore>> entangleRefs =
+                                    SpellVisualEffect.spawnEntangle(world, finalCells, npcYFinal);
+                            // Auto-despawn after 30 s if not in combat, or persist in combat
+                            if (!combatSettings.isCombatActive()) {
+                                PROJ_SCHEDULER.schedule(() -> world.execute(() -> {
+                                    for (com.hypixel.hytale.component.Ref<com.hypixel.hytale.server.core.universe.world.storage.EntityStore> r : entangleRefs) {
+                                        SpellVisualEffect.despawn(world, r);
+                                    }
+                                }), 30000L, java.util.concurrent.TimeUnit.MILLISECONDS);
+                            }
+                            // Register difficult terrain cells
                             for (SpellPatternCalculator.GridCell c : finalCells) {
-                                float wx = (c.x * 2.0f) + 1.0f;
-                                float wz = (c.z * 2.0f) + 1.0f;
-                                Float groundY = SpellVisualManager.scanForGround(
-                                        world, c.x, c.z, npcYFinal + 30f, 45);
-                                float wy = groundY != null ? groundY : npcYFinal;
-                                world.execute(() -> SpellVisualEffect.spawnGrowing(
-                                        "Entangle", 1.0f, world, wx, wy, wz, 500L));
+                                TerrainManager.addDifficultCell(c.x, c.z);
                             }
                             break;
                         }
@@ -476,6 +483,38 @@ public class CastFinalCommand extends AbstractPlayerCommand {
                                     world, finalCells, npcYFinal, allPlayers));
                             break;
                         }
+                        case "bardic_inspiration":
+                        case "vicious_mockery":
+                        case "bless":
+                        case "hex":
+                        case "hunters_mark":
+                        case "power_word_stun": {
+                            // Buff: spawn Mark under the target cell
+                            SpellCastingState.GridCell bt = castState.getConfirmedTargets().isEmpty()
+                                    ? new SpellCastingState.GridCell(aimGridX, aimGridZ)
+                                    : castState.getConfirmedTargets().get(0);
+                            world.execute(() -> SpellVisualEffect.spawnMark(world, bt.x, bt.z, npcYFinal, 4000L));
+                            break;
+                        }
+                        case "wind_dash":
+                        case "shadow_dash":
+                        case "shadow_step": {
+                            // Teleport: Mark at destination then Mark at origin briefly
+                            float casterWx = (castState.getCasterGridX() * 2.0f) + 1.0f;
+                            float casterWz = (castState.getCasterGridZ() * 2.0f) + 1.0f;
+                            Float casterGY = SpellVisualManager.scanForGround(world,
+                                    castState.getCasterGridX(), castState.getCasterGridZ(), npcYFinal + 30f, 45);
+                            float casterWy = (casterGY != null ? casterGY : npcYFinal) + 0.05f;
+                            world.execute(() -> {
+                                SpellVisualEffect.spawnWithTimeout("Mark", 1.0f, world,
+                                        casterWx, casterWy, casterWz, 0f, 600L); // origin flash
+                                SpellCastingState.GridCell dt = castState.getConfirmedTargets().isEmpty()
+                                        ? new SpellCastingState.GridCell(aimGridX, aimGridZ)
+                                        : castState.getConfirmedTargets().get(0);
+                                SpellVisualEffect.spawnMark(world, dt.x, dt.z, npcYFinal, 2500L);
+                            });
+                            break;
+                        }
                         case "call_lightning": {
                             // Repeated lightning strikes at target area over 3 seconds
                             SpellCastingState.GridCell tc = castState.getConfirmedTargets().isEmpty()
@@ -496,15 +535,81 @@ public class CastFinalCommand extends AbstractPlayerCommand {
                             break;
                         }
                         case "spirit_guardians": {
-                            // Orbiting radiant flash around the caster
                             float ox2 = (castState.getCasterGridX() * 2.0f) + 1.0f;
                             float oz2 = (castState.getCasterGridZ() * 2.0f) + 1.0f;
                             Float gy2 = SpellVisualManager.scanForGround(world, castState.getCasterGridX(), castState.getCasterGridZ(), npcYFinal + 30f, 45);
                             float wy2 = (gy2 != null ? gy2 : npcYFinal) + 1.0f;
-                            final float fOx = ox2, fWy = wy2, fOz = oz2;
-                            world.execute(() -> SpellVisualEffect.spawnWithTimeout("Moon_Beam", 2.0f, world, fOx, fWy, fOz, 0f, 2000L));
+                            final float fOx2 = ox2, fWy2 = wy2, fOz2 = oz2;
+                            world.execute(() -> SpellVisualEffect.spawnWithTimeout("Arcane_Bolt", 2.5f, world, fOx2, fWy2, fOz2, 0f, 2500L));
                             break;
                         }
+
+                        // ── Self-buffs: Mark on caster ─────────────────────────────────
+                        case "rage":
+                        case "reckless_attack":
+                        case "shield":
+                        case "iron_body":
+                        case "evasive_roll":
+                        case "arcane_ward":
+                        case "spell_resistance":
+                        case "portent":
+                        case "greater_portent":
+                        case "third_eye":
+                        case "expert_divination":
+                        case "overchannel":
+                        case "potent_cantrip":
+                        case "sculpt_spells":
+                        case "empowered_evocation":
+                        case "blessed_healer":
+                        case "disciple_of_life":
+                        case "supreme_healing":
+                        case "preserve_life": {
+                            // Buff flash: Mark under caster
+                            world.execute(() -> SpellVisualEffect.spawnMark(world,
+                                    castState.getCasterGridX(), castState.getCasterGridZ(), npcYFinal, 2500L));
+                            break;
+                        }
+
+                        // ── Frost aura: Frost_Bolt ring ────────────────────────────────
+                        case "frost_shell": {
+                            for (SpellPatternCalculator.GridCell c : finalCells) {
+                                float wx = (c.x * 2.0f) + 1.0f;
+                                float wz = (c.z * 2.0f) + 1.0f;
+                                Float groundY = SpellVisualManager.scanForGround(world, c.x, c.z, npcYFinal + 30f, 45);
+                                float wy = (groundY != null ? groundY : npcYFinal) + 0.5f;
+                                world.execute(() -> SpellVisualEffect.spawnWithTimeout("Frost_Bolt", 0.8f, world, wx, wy, wz, 0f, 2000L));
+                            }
+                            break;
+                        }
+
+                        // ── Healing auras: Heal_Circle under caster ────────────────────
+                        case "healing_song":
+                        case "aura_of_protection":
+                        case "hurricane_strike": {
+                            float casterWx = (castState.getCasterGridX() * 2.0f) + 1.0f;
+                            float casterWz = (castState.getCasterGridZ() * 2.0f) + 1.0f;
+                            Float cGY = SpellVisualManager.scanForGround(world, castState.getCasterGridX(), castState.getCasterGridZ(), npcYFinal + 30f, 45);
+                            float cWy = (cGY != null ? cGY : npcYFinal) + 0.1f;
+                            final float fCWx = casterWx, fCWy = cWy, fCWz = casterWz;
+                            world.execute(() -> SpellVisualEffect.spawnWithTimeout("Heal_Circle", 2.0f, world, fCWx, fCWy, fCWz, 0f, 3000L));
+                            break;
+                        }
+
+                        // ── Hypnotic Pattern: Arcane_Bolt pillars in area ─────────────
+                        case "hypnotic_pattern": {
+                            for (SpellPatternCalculator.GridCell c : finalCells) {
+                                float wx = (c.x * 2.0f) + 1.0f;
+                                float wz = (c.z * 2.0f) + 1.0f;
+                                Float groundY = SpellVisualManager.scanForGround(world, c.x, c.z, npcYFinal + 30f, 45);
+                                float wy = (groundY != null ? groundY : npcYFinal) + 0.5f;
+                                world.execute(() -> SpellVisualEffect.spawnWithTimeout("Arcane_Bolt", 0.9f, world, wx, wy, wz, 0f, 3000L));
+                            }
+                            break;
+                        }
+
+                        // ── Wild Shape: Mark at caster feet (transform flash) ──────────
+                        // (actual model swap handled by WildShapeManager above; this just
+                        //  adds a ground Mark as visual feedback that the transform happened)
                     }
                 }
 
@@ -689,7 +794,7 @@ public class CastFinalCommand extends AbstractPlayerCommand {
         final long fLinger = lingerMs;
         PROJ_SCHEDULER.schedule(() -> world.execute(() ->
                         SpellVisualEffect.spawnWithTimeout(
-                                "Moon_Beam", fScale, world, ftx, fty, ftz, 0f, fLinger)),
+                                "Explosion", fScale, world, ftx, fty, ftz, 0f, fLinger)),
                 travelMs, java.util.concurrent.TimeUnit.MILLISECONDS);
     }
 

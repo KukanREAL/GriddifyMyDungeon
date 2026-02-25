@@ -8,6 +8,21 @@ public class CombatSettings {
     // Critical roll settings
     private boolean criticalRollsEnabled = false;
     private boolean criticalInitiativeEnabled = false;
+    private boolean combatActive = false;
+
+    /**
+     * Set combat active state (called by CombatManager when combat starts/ends)
+     */
+    public void setCombatActive(boolean active) {
+        combatActive = active;
+    }
+
+    /**
+     * Check if combat is currently running
+     */
+    public boolean isCombatActive() {
+        return combatActive;
+    }
 
     /**
      * Toggle critical rolls for dice

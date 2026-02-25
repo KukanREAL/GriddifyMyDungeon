@@ -8,6 +8,7 @@ import com.gridifymydungeon.plugin.gridmove.CollisionDetector;
 import com.gridifymydungeon.plugin.gridmove.GridMoveManager;
 import com.gridifymydungeon.plugin.gridmove.GridOverlayManager;
 import com.gridifymydungeon.plugin.gridmove.GridPlayerState;
+import com.gridifymydungeon.plugin.gridmove.TerrainManager;
 import com.gridifymydungeon.plugin.spell.SpellCastingState;
 import com.gridifymydungeon.plugin.spell.SpellPatternCalculator;
 import com.gridifymydungeon.plugin.spell.SpellVisualManager;
@@ -247,7 +248,9 @@ public class PlayerPositionTracker {
             return;
         }
 
-        double moveCost = calculateMoveCost(state.currentGridX, state.currentGridZ, newGridX, newGridZ);
+        double baseMoveCost = calculateMoveCost(state.currentGridX, state.currentGridZ, newGridX, newGridZ);
+        double terrainMult = TerrainManager.getMoveCostMultiplier(newGridX, newGridZ, (float) playerY, world);
+        double moveCost = baseMoveCost * terrainMult;
 
         // FIXED: Only consume moves during combat. Outside combat = free movement.
         boolean inCombat = combatManager.isCombatActive();

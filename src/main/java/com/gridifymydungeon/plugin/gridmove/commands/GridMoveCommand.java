@@ -177,6 +177,10 @@ public class GridMoveCommand extends AbstractPlayerCommand {
                     world, state, finalGridX, finalGridZ, playerPos.getY(), playerEntityRef);
 
             if (success) {
+                // Copy real player's armor + held item onto the NPC
+                PlayerEntityController.broadcastEquipmentFromPlayer(
+                        world.getEntityStore().getStore(), playerEntityRef, state.npcEntity);
+
                 manager.spawnDirectionHolograms(world, state);
 
                 String movesInfo;

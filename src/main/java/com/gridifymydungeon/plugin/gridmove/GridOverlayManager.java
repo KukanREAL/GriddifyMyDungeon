@@ -4,6 +4,7 @@ import com.hypixel.hytale.component.Holder;
 import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.component.RemoveReason;
 import com.hypixel.hytale.component.Store;
+import com.gridifymydungeon.plugin.gridmove.TerrainManager;
 import com.hypixel.hytale.math.util.ChunkUtil;
 import com.hypixel.hytale.math.vector.Vector3d;
 import com.hypixel.hytale.math.vector.Vector3f;
@@ -45,13 +46,15 @@ import java.util.UUID;
  */
 public class GridOverlayManager {
 
-    private static final String MODEL_PLAYER  = "Grid_Player"; // blue
-    private static final String MODEL_DEFAULT = "Grid_Basic";  // grey
-    private static final String FALLBACK_MODEL = "Debug";
+    private static final String MODEL_PLAYER    = "Grid_Player"; // blue
+    private static final String MODEL_DEFAULT   = "Grid_Basic";  // grey
+    private static final String MODEL_DIFFICULT = "Grid_Difficult"; // difficult terrain overlay
+    private static final String FALLBACK_MODEL  = "Debug";
 
-    private static Model cachedPlayerModel  = null;
-    private static Model cachedDefaultModel = null;
-    private static boolean modelsAttempted  = false;
+    private static Model cachedPlayerModel    = null;
+    private static Model cachedDefaultModel   = null;
+    private static Model cachedDifficultModel = null;
+    private static boolean modelsAttempted    = false;
 
     private static final int MAX_OVERLAY_CELLS = 150;
     private static final int GM_MAP_RADIUS     = 15;   // 30x30 (/grid command)
@@ -196,11 +199,17 @@ public class GridOverlayManager {
                                    List<ReachableCell> cells, Model model, float yOffset) {
         Store<EntityStore> store = world.getEntityStore().getStore();
         for (ReachableCell cell : cells) {
+            // Choose difficult overlay if terrain warrants it
+            Model cellModel = model;
+            if (cachedDifficultModel != null && cachedDifficultModel != model
+                    && TerrainManager.shouldShowDifficultOverlay(cell.gridX, cell.gridZ, cell.groundY, world)) {
+                cellModel = cachedDifficultModel;
+            }
             // Centre of the 2x2 block: gridX*2 + 1, gridZ*2 + 1
             float cx = (cell.gridX * 2.0f) + 1.0f;
             float cz = (cell.gridZ * 2.0f) + 1.0f;
             float y  = cell.groundY + yOffset;
-            Ref<EntityStore> ref = spawnTile(store, model, cx, y, cz);
+            Ref<EntityStore> ref = spawnTile(store, cellModel, cx, y, cz);
             state.gridOverlay.add(ref);
         }
     }
@@ -390,8 +399,9 @@ public class GridOverlayManager {
     private static void ensureModels() {
         if (modelsAttempted) return;
         modelsAttempted = true;
-        cachedPlayerModel  = loadModel(MODEL_PLAYER);
-        cachedDefaultModel = loadModel(MODEL_DEFAULT);
+        cachedPlayerModel    = loadModel(MODEL_PLAYER);
+        cachedDefaultModel   = loadModel(MODEL_DEFAULT);
+        cachedDifficultModel = loadModel(MODEL_DIFFICULT);
         if (cachedPlayerModel  == null) cachedPlayerModel  = cachedDefaultModel;
         if (cachedDefaultModel == null) {
             cachedDefaultModel = loadModel(FALLBACK_MODEL);

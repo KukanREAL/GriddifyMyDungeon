@@ -10,18 +10,24 @@ import com.hypixel.hytale.math.vector.Vector3d;
 import com.hypixel.hytale.math.vector.Vector3f;
 import com.hypixel.hytale.math.vector.Vector3i;
 import com.hypixel.hytale.protocol.BlockMaterial;
+import com.hypixel.hytale.protocol.EquipmentUpdate;
 import com.hypixel.hytale.protocol.PlayerSkin;
 import com.hypixel.hytale.server.core.Message;
 import com.hypixel.hytale.server.core.asset.type.blocktype.config.BlockType;
 import com.hypixel.hytale.server.core.asset.type.model.config.ModelAsset;
 import com.hypixel.hytale.server.core.asset.type.model.config.Model;
 import com.hypixel.hytale.server.core.entity.UUIDComponent;
+import com.hypixel.hytale.server.core.entity.entities.Player;
+import com.hypixel.hytale.server.core.inventory.Inventory;
+import com.hypixel.hytale.server.core.inventory.ItemStack;
+import com.hypixel.hytale.server.core.inventory.container.ItemContainer;
 import com.hypixel.hytale.server.core.modules.entity.component.BoundingBox;
 import com.hypixel.hytale.server.core.modules.entity.component.HeadRotation;
 import com.hypixel.hytale.server.core.modules.entity.component.ModelComponent;
 import com.hypixel.hytale.server.core.modules.entity.component.PersistentModel;
 import com.hypixel.hytale.server.core.modules.entity.component.TransformComponent;
 import com.hypixel.hytale.server.core.modules.entity.player.PlayerSkinComponent;
+import com.hypixel.hytale.server.core.modules.entity.tracker.EntityTrackerSystems;
 import com.hypixel.hytale.server.core.modules.entity.tracker.NetworkId;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.world.World;
@@ -30,6 +36,8 @@ import com.hypixel.hytale.server.core.universe.world.chunk.section.ChunkSection;
 import com.hypixel.hytale.server.core.universe.world.chunk.section.FluidSection;
 import com.hypixel.hytale.server.core.universe.world.storage.ChunkStore;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
+
+import java.util.Arrays;
 
 /**
  * Controls player NPC spawning and movement.
@@ -245,6 +253,86 @@ public class PlayerEntityController {
 
     public static Float scanForGroundPublic(World world, int gridX, int gridZ, float referenceY) {
         return scanForGround(world, gridX, gridZ, referenceY, MIN_SCAN_OFFSET, MAX_SCAN_OFFSET);
+    }
+
+    /**
+     * Reads the real player's current armor and held item, then broadcasts an
+     * Equipment ComponentUpdate to every viewer that can already see the NPC.
+     *
+     * Call this right after spawnPlayerNpc() succeeds.
+     *
+     * @param store      the EntityStore for the world
+     * @param playerRef  the real player entity reference (used to read inventory)
+     * @param npcRef     the freshly spawned NPC entity reference (update target)
+     */
+    public static void broadcastEquipmentFromPlayer(Store<EntityStore> store,
+                                                    Ref<EntityStore> playerRef,
+                                                    Ref<EntityStore> npcRef) {
+        try {
+            // 1. Read the real player's inventory
+            Player playerComponent = store.getComponent(playerRef, Player.getComponentType());
+            if (playerComponent == null) {
+                System.err.println("[GridMove] [Equipment] Could not read Player component.");
+                return;
+            }
+
+            Inventory inventory = playerComponent.getInventory();
+
+            // Build armor ID array (4 slots: Head, Chest, Hands, Legs)
+            ItemContainer armorContainer = inventory.getArmor();
+            int armorCapacity = armorContainer.getCapacity();
+            String[] armorIds = new String[armorCapacity];
+            Arrays.fill(armorIds, "");
+            armorContainer.forEachWithMeta(
+                    (slot, itemStack, accumulator) -> accumulator[slot] = itemStack.getItemId(),
+                    armorIds
+            );
+
+            // Right hand = active hotbar item; left hand = utility slot
+            ItemStack inHand  = inventory.getItemInHand();
+            ItemStack utility = inventory.getUtilityItem();
+
+            String rightHandId = (inHand  != null && !inHand.isEmpty())  ? inHand.getItemId()  : "Empty";
+            String leftHandId  = (utility != null && !utility.isEmpty()) ? utility.getItemId() : "Empty";
+
+            // 2. Build the EquipmentUpdate (it extends ComponentUpdate directly)
+            EquipmentUpdate update = new EquipmentUpdate();
+            update.armorIds        = armorIds;
+            update.rightHandItemId = rightHandId;
+            update.leftHandItemId  = leftHandId;
+
+            // 3. Push to all viewers that can currently see the NPC
+            EntityTrackerSystems.Visible visible =
+                    store.getComponent(npcRef, EntityTrackerSystems.Visible.getComponentType());
+
+            if (visible == null) {
+                System.out.println("[GridMove] [Equipment] NPC has no Visible component yet - skipping.");
+                return;
+            }
+
+            int sent = 0;
+            if (visible.visibleTo != null) {
+                for (EntityTrackerSystems.EntityViewer viewer : visible.visibleTo.values()) {
+                    viewer.queueUpdate(npcRef, update);
+                    sent++;
+                }
+            }
+            // Also cover players for whom the NPC is newly visible this tick
+            if (visible.newlyVisibleTo != null) {
+                for (EntityTrackerSystems.EntityViewer viewer : visible.newlyVisibleTo.values()) {
+                    viewer.queueUpdate(npcRef, update);
+                    sent++;
+                }
+            }
+
+            System.out.println("[GridMove] [Equipment] Sent to " + sent + " viewer(s). "
+                    + "Right=" + rightHandId + " Left=" + leftHandId
+                    + " Armor=" + Arrays.toString(armorIds));
+
+        } catch (Exception e) {
+            System.err.println("[GridMove] [Equipment] Failed: " + e.getMessage());
+            e.printStackTrace();
+        }
     }
 
     // ====================================================================

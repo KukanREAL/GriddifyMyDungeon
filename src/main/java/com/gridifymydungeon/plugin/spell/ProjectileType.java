@@ -65,7 +65,18 @@ public enum ProjectileType {
     MELEE_FLASH          ("Arcane_Bolt",    null, 0.7f, "Sparkle_Explosion", 0.3f),
 
     // ── Cone variants ────────────────────────────────────────────────────────
-    ARCANE_CONE          ("Arcane_Bolt",    null, 0.9f, "Sparkle_Explosion", 0.3f);
+    ARCANE_CONE          ("Arcane_Bolt",    null, 0.9f, "Sparkle_Explosion", 0.3f),
+
+    // ── Electric explosion (Zap model) ───────────────────────────────────────
+    ZAP                  ("Zap",             null, 1.0f, "Explosion_Big",     0.6f),
+    ZAP_LARGE            ("Zap",             null, 2.0f, "Explosion_Big",     1.0f),
+
+    // ── Buff / Mark (Mark model — 2x2 flat tile, ground-level) ───────────────
+    MARK_BUFF            ("Mark",            null, 1.0f, null,                0f),
+
+    // ── Dark / Crimson spells ─────────────────────────────────────────────────
+    CRIMSON_BOLT         ("Crimson_Spell",   null, 1.0f, "Explosion_Big",     0.5f),
+    CRIMSON_BLAST        ("Crimson_Spell",   null, 1.5f, "Explosion_Big",     0.8f);
 
     // ────────────────────────────────────────────────────────────────────────
 
@@ -150,24 +161,33 @@ public enum ProjectileType {
             case "battle_cry":
             case "detect_thoughts":              return ARCANE_CONE;
 
-            // ── Utility / buff (no projectile) ──────────────────────────────
-            // These are handled by effect-only logic in CastFinalCommand;
-            // returning null keeps them out of the projectile path.
+            // ── Buff effects: Mark model (flat glowing tile under target) ────────
             case "hex":
             case "hunters_mark":
             case "bless":
             case "bardic_inspiration":
             case "vicious_mockery":
             case "power_word_stun":
-            case "hail_of_thorns":
-            case "foresight":
-            case "true_seeing":
-            case "scrying":
+
+                // ── Teleport self: Mark under caster ─────────────────────────────────
+            case "wind_dash":
+            case "shadow_dash":
+            case "shadow_step":            return MARK_BUFF;
+
+            // ── Dark / Crimson spells ─────────────────────────────────────────────
+            case "soul_cage":
+            case "hunger_of_hadar":
+            case "arms_of_hadar":          return CRIMSON_BLAST;
+
+            // ── Heals — no projectile, handled separately ─────────────────────────
             case "lay_on_hands":
             case "cure_wounds":
             case "heal":
             case "mass_cure_wounds":
-                return null; // heals handled separately
+            case "hail_of_thorns":
+            case "foresight":
+            case "true_seeing":
+            case "scrying":                return null; // heals/passives handled separately
 
             // ── Ice_Storm / Chromatic_Orb handled elsewhere ─────────────────
             default:                             return null;
