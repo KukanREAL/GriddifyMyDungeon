@@ -1,4 +1,5 @@
 package com.gridifymydungeon.plugin.gridmove.commands;
+import com.gridifymydungeon.plugin.debug.DebugRoleWrapper;
 
 import com.gridifymydungeon.plugin.dnd.PlayerEntityController;
 import com.gridifymydungeon.plugin.dnd.RoleManager;
@@ -48,7 +49,7 @@ public class GridMoveCommand extends AbstractPlayerCommand {
                            @Nonnull Ref<EntityStore> ref, @Nonnull PlayerRef playerRef, @Nonnull World world) {
 
         // BLOCK GM FROM USING THIS COMMAND
-        if (roleManager.isGM(playerRef)) {
+        if (DebugRoleWrapper.isGM(roleManager, playerRef)) {
             // ERROR: GMs cannot use gridmove
             Message primary = Message.raw("GMs cannot use /gridmove!").color("#FF0000");
             Message secondary = Message.raw("Use /creature and /control instead").color("#FF6B6B");
@@ -177,9 +178,13 @@ public class GridMoveCommand extends AbstractPlayerCommand {
                     world, state, finalGridX, finalGridZ, playerPos.getY(), playerEntityRef);
 
             if (success) {
-                // Copy real player's armor + held item onto the NPC
-                PlayerEntityController.broadcastEquipmentFromPlayer(
-                        world.getEntityStore().getStore(), playerEntityRef, state.npcEntity);
+                // Copy real player's armor + held item onto the NPC.
+                // Delay 500ms so the entity tracker populates visibleTo before we push the update.
+                final Ref<com.hypixel.hytale.server.core.universe.world.storage.EntityStore> npcRef = state.npcEntity;
+                java.util.concurrent.Executors.newSingleThreadScheduledExecutor().schedule(() ->
+                                world.execute(() -> PlayerEntityController.broadcastEquipmentFromPlayer(
+                                        world.getEntityStore().getStore(), playerEntityRef, npcRef)),
+                        500L, java.util.concurrent.TimeUnit.MILLISECONDS);
 
                 manager.spawnDirectionHolograms(world, state);
 

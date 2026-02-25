@@ -21,6 +21,7 @@ public class SpellDatabase {
         initializeBaseClassSpells();
         initializeSubclassSpells();
         initializeMonsterAttacks();
+        registerClassAttacks();
         buildIndices();
     }
 
@@ -331,11 +332,11 @@ public class SpellDatabase {
 
         registerBase(new SpellData(
                 "Thunderwave",
-                1, 0, SpellPattern.CUBE, 1,
+                1, 0, SpellPattern.WALL, 2,
                 "2d8", DamageType.THUNDER,
                 ClassType.BARD, 1,
                 false, 0,
-                "15ft cube (1 grid radius = 3x3 grids). CON save for half, push 2 grids on fail. +1d8 per level"
+                "15ft cube (5-wide wall in front of caster). CON save for half, push 2 grids on fail. +1d8 per level"
         ));
 
         registerBase(new SpellData(
@@ -411,7 +412,8 @@ public class SpellDatabase {
                 "1d10", DamageType.FIRE,
                 ClassType.SORCERER, 1,
                 false, 0,
-                "Metamagic. Costs 1 sorcery point. Hit two targets simultaneously"
+                "Metamagic. Costs 1 sorcery point. Hit two targets simultaneously",
+                2  // maxTargets = 2: use /CastTarget twice then /CastFinal
         ));
 
         registerBase(new SpellData(
@@ -1461,6 +1463,24 @@ public class SpellDatabase {
      */
     private static void registerSubclass(SpellData spell) {
         SPELL_MAP.put(spell.getName().toLowerCase(), spell);
+    }
+
+    /**
+     * Class basic attacks — no spell slot, counts as action.
+     */
+    private static void registerClassAttacks() {
+        registerBase(new SpellData("Sword_Swing",       0, 1,  SpellPattern.SINGLE_TARGET, 0, "1d8",  DamageType.SLASHING,    ClassType.FIGHTER,   1, false, 0, "Longsword attack. Melee 1 grid. STR-based"));
+        registerBase(new SpellData("Bow_Shot",          0, 24, SpellPattern.SINGLE_TARGET, 0, "1d8",  DamageType.PIERCING,    ClassType.RANGER,    1, false, 0, "Longbow attack. Ranged 24 grids. DEX-based (Arrow_Iron)"));
+        registerBase(new SpellData("Sneak_Stab",        0, 1,  SpellPattern.SINGLE_TARGET, 0, "1d6",  DamageType.PIERCING,    ClassType.ROGUE,     1, false, 0, "Dagger attack. Melee 1 grid. DEX-based (+1d6 sneak if flanking)"));
+        registerBase(new SpellData("Greataxe_Swing",    0, 1,  SpellPattern.SINGLE_TARGET, 0, "1d12", DamageType.SLASHING,    ClassType.BARBARIAN, 1, false, 0, "Greataxe attack. Melee 1 grid. STR-based"));
+        registerBase(new SpellData("Shortsword_Slash",  0, 1,  SpellPattern.SINGLE_TARGET, 0, "1d6",  DamageType.PIERCING,    ClassType.BARD,      1, false, 0, "Shortsword attack. Melee 1 grid. DEX-based"));
+        registerBase(new SpellData("Morningstar_Strike",0, 1,  SpellPattern.SINGLE_TARGET, 0, "1d8",  DamageType.PIERCING,    ClassType.CLERIC,    1, false, 0, "Morningstar attack. Melee 1 grid. STR-based"));
+        registerBase(new SpellData("Staff_Strike",      0, 1,  SpellPattern.SINGLE_TARGET, 0, "1d6",  DamageType.BLUDGEONING, ClassType.DRUID,     1, false, 0, "Quarterstaff attack. Melee 1 grid. STR-based"));
+        registerBase(new SpellData("Unarmed_Strike",    0, 1,  SpellPattern.SINGLE_TARGET, 0, "1d6",  DamageType.BLUDGEONING, ClassType.MONK,      1, false, 0, "Unarmed martial arts strike. Melee 1 grid. DEX or STR-based"));
+        registerBase(new SpellData("Paladin_Strike",    0, 1,  SpellPattern.SINGLE_TARGET, 0, "1d8",  DamageType.SLASHING,    ClassType.PALADIN,   1, false, 0, "Longsword attack. Melee 1 grid. STR-based (chain /cast Divine_Smite after hit)"));
+        registerBase(new SpellData("Dagger_Throw",      0, 6,  SpellPattern.SINGLE_TARGET, 0, "1d4",  DamageType.PIERCING,    ClassType.SORCERER,  1, false, 0, "Dagger throw. Ranged 6 grids. DEX-based"));
+        registerBase(new SpellData("Pact_Blade",        0, 1,  SpellPattern.SINGLE_TARGET, 0, "1d8",  DamageType.SLASHING,    ClassType.WARLOCK,   1, false, 0, "Pact of the Blade. Melee 1 grid. CHA-based"));
+        registerBase(new SpellData("Quarterstaff",      0, 1,  SpellPattern.SINGLE_TARGET, 0, "1d6",  DamageType.BLUDGEONING, ClassType.WIZARD,    1, false, 0, "Quarterstaff attack. Melee 1 grid. STR-based"));
     }
 
     /**

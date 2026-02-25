@@ -107,19 +107,20 @@ public class TerrainManager {
     // ── Block scan ────────────────────────────────────────────────────────────
     private static boolean hasNaturalDifficultTerrain(World world, int gridX, int gridZ, float playerY) {
         try {
-            // World X/Z centre of the 2×2 grid cell
-            int worldX = gridX * 2 + 1;
-            int worldZ = gridZ * 2 + 1;
             int blockY = (int) Math.floor(playerY);
-
-            // Check the block the player is standing ON (one below feet)
-            String surfaceId = getBlockId(world, worldX, blockY - 1, worldZ);
-            if (surfaceId != null && DIFFICULT_SURFACE_BLOCKS.contains(surfaceId)) return true;
-
-            // Check the block at feet level (standing IN: flora, webs, vines)
-            String feetId = getBlockId(world, worldX, blockY, worldZ);
-            if (feetId != null && DIFFICULT_FLORA_BLOCKS.contains(feetId)) return true;
-
+            // Check all 4 blocks of the 2×2 grid cell
+            int[] xs = { gridX * 2, gridX * 2 + 1 };
+            int[] zs = { gridZ * 2, gridZ * 2 + 1 };
+            for (int wx : xs) {
+                for (int wz : zs) {
+                    // Block the player stands ON (surface)
+                    String surfaceId = getBlockId(world, wx, blockY - 1, wz);
+                    if (surfaceId != null && DIFFICULT_SURFACE_BLOCKS.contains(surfaceId)) return true;
+                    // Block at feet level (flora, webs, vines)
+                    String feetId = getBlockId(world, wx, blockY, wz);
+                    if (feetId != null && DIFFICULT_FLORA_BLOCKS.contains(feetId)) return true;
+                }
+            }
         } catch (Exception ignored) {}
         return false;
     }

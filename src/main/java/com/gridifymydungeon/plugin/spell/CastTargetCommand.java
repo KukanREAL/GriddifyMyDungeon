@@ -12,6 +12,7 @@ import com.hypixel.hytale.server.core.universe.world.World;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 
 import javax.annotation.Nonnull;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -100,30 +101,42 @@ public class CastTargetCommand extends AbstractPlayerCommand {
             return;
         }
 
-        // Always recompute cells from current aim position — overlay updates each /CastTarget.
-        // This lets the player walk to a different cell and call /CastTarget there again.
-        // Confirmed targets accumulate across calls; the overlay shows the CURRENT aim cell.
-        {
-            Set<SpellPatternCalculator.GridCell> cells = CastCommand.computeOverlay(
-                    pattern, castState.getDirection(),
-                    castState.getCasterGridX(), castState.getCasterGridZ(),
-                    spell, aimX, aimZ);
-            castState.setConfirmedCells(cells, aimX, aimZ);
-            final float refY = castState.getCasterY();
-            world.execute(() -> visualManager.showSpellArea(playerRef.getUuid(), cells, world, refY));
-        }
+        // Always recompute cells from current aim position.
+        Set<SpellPatternCalculator.GridCell> cells = CastCommand.computeOverlay(
+                pattern, castState.getDirection(),
+                castState.getCasterGridX(), castState.getCasterGridZ(),
+                spell, aimX, aimZ);
+        castState.setConfirmedCells(cells, aimX, aimZ);
 
-        // Append this target (same cell allowed multiple times)
+        // Append this target BEFORE redrawing so all stacked tiles are replayed correctly
         castState.confirmTarget();
         int totalConfirmed = castState.getConfirmedTargetCount();
         int hitCount = castState.getTargetCountAt(aimX, aimZ);
 
-        // Spawn a scaled Grid_Spell tile on the confirmed cell (0.2 smaller each repeat)
-        final SpellPatternCalculator.GridCell targetCell = new SpellPatternCalculator.GridCell(aimX, aimZ);
+        // Compute hit counts for ALL previously confirmed unique cells so we can re-add their tiles
+        final java.util.Map<String, Integer> hitCountMap = new java.util.LinkedHashMap<>();
+        for (SpellCastingState.GridCell c : castState.getConfirmedTargets()) {
+            String key = c.x + "," + c.z;
+            hitCountMap.put(key, hitCountMap.getOrDefault(key, 0) + 1);
+        }
+
         final float refY = castState.getCasterY();
-        final int finalHit = hitCount;
-        world.execute(() -> visualManager.addStackedSpellTile(
-                playerRef.getUuid(), targetCell, finalHit, world, refY));
+        final Set<SpellPatternCalculator.GridCell> finalCells = cells;
+        final java.util.Map<String, Integer> finalHitCounts = hitCountMap;
+
+        world.execute(() -> {
+            // showSpellArea clears all visuals then draws base overlay for the current aim cell
+            visualManager.showSpellArea(playerRef.getUuid(), finalCells, world, refY);
+            // Re-add stacked tiles for ALL confirmed cells (including this one)
+            for (java.util.Map.Entry<String, Integer> e : finalHitCounts.entrySet()) {
+                String[] parts = e.getKey().split(",");
+                int cx = Integer.parseInt(parts[0]), cz = Integer.parseInt(parts[1]);
+                SpellPatternCalculator.GridCell cell = new SpellPatternCalculator.GridCell(cx, cz);
+                for (int i = 1; i <= e.getValue(); i++) {
+                    visualManager.addStackedSpellTile(playerRef.getUuid(), cell, i, world, refY);
+                }
+            }
+        });
 
         // Unified feedback for all spell types
         String hitNote = hitCount > 1

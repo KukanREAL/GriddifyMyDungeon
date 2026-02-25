@@ -1,4 +1,5 @@
 package com.gridifymydungeon.plugin.spell;
+import com.gridifymydungeon.plugin.debug.DebugRoleWrapper;
 
 import com.gridifymydungeon.plugin.dnd.EncounterManager;
 import com.gridifymydungeon.plugin.gridmove.CollisionDetector;
@@ -65,7 +66,7 @@ public class CastCommand extends AbstractPlayerCommand {
         GridPlayerState state = playerManager.getState(playerRef);
 
         // GM controlling a monster can cast without having a personal class
-        boolean isGmControlling = roleManager.isGM(playerRef) && encounterManager.getControlledMonster() != null;
+        boolean isGmControlling = DebugRoleWrapper.isGM(roleManager, playerRef) && encounterManager.getControlledMonster() != null;
         if (state.stats.getClassType() == null && !isGmControlling) {
             playerRef.sendMessage(Message.raw("[Griddify] Choose a class first! Use /GridClass").color("#FF0000"));
             return;
@@ -140,7 +141,9 @@ public class CastCommand extends AbstractPlayerCommand {
         // Initial direction: player's current body yaw (will rotate live for CONE/LINE/WALL)
         float yaw = 0f;
         try { yaw = playerRef.getTransform().getRotation().getY(); } catch (Exception ignored) {}
-        Direction8 initialDirection = Direction8.fromYaw(yaw);
+        // getRotation().getY() returns radians; Direction8.fromYaw expects degrees
+        float yawDeg = (float) Math.toDegrees(yaw);
+        Direction8 initialDirection = Direction8.fromYaw(yawDeg);
 
         float playerY = casterY; // Use NPC/monster ground Y as reference, not raw body height
 
@@ -150,10 +153,15 @@ public class CastCommand extends AbstractPlayerCommand {
         final int fCasterGridX = casterGridX, fCasterGridZ = casterGridZ;
         final int fRange = spell.getRangeGrids();
         final float fCasterY = casterY;
-        world.execute(() ->
-                visualManager.showRangeOverlay(
-                        playerRef.getUuid(), fCasterGridX, fCasterGridZ, fRange, world, fCasterY)
-        );
+        // Remove movement overlay to prevent texture glitching under spell overlay
+        final GridPlayerState fState = state;
+        world.execute(() -> {
+            if (fState.gridOverlayEnabled && !fState.gmMapOverlayActive) {
+                GridOverlayManager.removeGridOverlay(world, fState);
+            }
+            visualManager.showRangeOverlay(
+                    playerRef.getUuid(), fCasterGridX, fCasterGridZ, fRange, world, fCasterY);
+        });
 
         // -----------------------------------------------------------------------
         // SELF / AURA: instant, no freeze
@@ -285,7 +293,7 @@ public class CastCommand extends AbstractPlayerCommand {
     private boolean canAccessSpell(GridPlayerState state, SpellData spell, PlayerRef playerRef) {
         // ── Monster-type-locked attack ────────────────────────────────────────
         if (spell.isMonsterAttack()) {
-            if (!roleManager.isGM(playerRef)) return false;
+            if (!DebugRoleWrapper.isGM(roleManager, playerRef)) return false;
             com.gridifymydungeon.plugin.dnd.MonsterState controlled = encounterManager.getControlledMonster();
             if (controlled == null) return false;
             return spell.getRequiredMonsterType() == controlled.monsterType;
@@ -293,11 +301,11 @@ public class CastCommand extends AbstractPlayerCommand {
 
         // ── Old generic monster attacks (classType == null, not locked) ───────
         if (spell.getClassType() == null && !spell.isSubclassSpell()) {
-            return roleManager.isGM(playerRef) && encounterManager.getControlledMonster() != null;
+            return DebugRoleWrapper.isGM(roleManager, playerRef) && encounterManager.getControlledMonster() != null;
         }
 
         // ── GM controlling a monster with a player-class ──────────────────────
-        if (roleManager.isGM(playerRef)) {
+        if (DebugRoleWrapper.isGM(roleManager, playerRef)) {
             com.gridifymydungeon.plugin.dnd.MonsterState controlled = encounterManager.getControlledMonster();
             if (controlled != null) {
                 if (spell.isSubclassSpell()) return spell.getSubclass() == controlled.stats.getSubclassType();

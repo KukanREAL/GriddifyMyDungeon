@@ -1,4 +1,5 @@
 package com.gridifymydungeon.plugin.gridmove.packet;
+import com.gridifymydungeon.plugin.debug.DebugRoleWrapper;
 
 import com.gridifymydungeon.plugin.dnd.CombatManager;
 import com.gridifymydungeon.plugin.dnd.EncounterManager;
@@ -58,7 +59,7 @@ public class PlayerPositionTracker {
     }
 
     public void onPlayerMove(PlayerRef playerRef, World world, Vector3d newPosition) {
-        if (roleManager.isGM(playerRef)) {
+        if (DebugRoleWrapper.isGM(roleManager, playerRef)) {
             return;
         }
 
@@ -142,7 +143,14 @@ public class PlayerPositionTracker {
                 // If still casting after the range check, update position and redraw overlay.
                 // Skip if the player already confirmed a pattern with /CastTarget — the overlay
                 // should stay frozen on the confirmed cells regardless of where they walk.
-                if (state.getSpellCastingState() != null && !castState.hasConfirmedCells()) {
+                // EXCEPTION: for multi-target SINGLE_TARGET spells (e.g. Magic_Missile), allow
+                // continued aiming if there are still targets left to confirm.
+                boolean aimFrozen = castState.hasConfirmedCells();
+                if (aimFrozen && pattern == com.gridifymydungeon.plugin.spell.SpellPattern.SINGLE_TARGET
+                        && !castState.hasAllTargets()) {
+                    aimFrozen = false; // still need more targets — let player walk to next cell
+                }
+                if (state.getSpellCastingState() != null && !aimFrozen) {
                     castState.updatePlayerPosition(newGridX, newGridZ); // updates direction for CONE/LINE/WALL
                     final int px = newGridX, pz = newGridZ;
                     final float py = (float) newPosition.getY();
@@ -229,8 +237,11 @@ public class PlayerPositionTracker {
         }
 
         if (state.isFrozen) {
-            playerRef.sendMessage(com.hypixel.hytale.server.core.Message.raw(
-                    "[GridMove] NPC frozen! Return to (" + state.currentGridX + ", " + state.currentGridZ + ")"));
+            if (!state.frozenMessageSent) {
+                playerRef.sendMessage(com.hypixel.hytale.server.core.Message.raw(
+                        "[GridMove] NPC frozen! Return to (" + state.currentGridX + ", " + state.currentGridZ + ")"));
+                state.frozenMessageSent = true;
+            }
             return;
         }
 

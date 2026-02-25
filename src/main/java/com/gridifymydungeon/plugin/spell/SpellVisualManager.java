@@ -86,7 +86,7 @@ public class SpellVisualManager {
             Float groundY = scanForGround(world, cell.x, cell.z, referenceY + 30.0f, 45);
             if (groundY == null) groundY = referenceY;
 
-            float y = groundY + 0.03f;
+            float y = groundY + 0.06f;  // Raised above Grid_Player/Grid_Difficult (0.01f)
             Ref<EntityStore> ref = spawnTile(store, model, cx, y, cz);
             if (ref != null) newVisuals.add(ref);
         }

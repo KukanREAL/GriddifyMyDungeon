@@ -129,16 +129,40 @@ public class SpellVisualEffect {
      * Three complete passes run back-to-back (waves 2 and 3 start after the previous
      * wave has finished).
      */
+    /**
+     * Thunderwave wave: 3 sweeps of columns, 2 entities per cell offset by ±0.5 perpendicular
+     * to the cast direction. Excludes the caster cell.
+     */
     public static void spawnWave(String modelAssetId, float entityScale,
                                  World world,
                                  int casterGridX, int casterGridZ, float npcY,
                                  Set<SpellPatternCalculator.GridCell> cells,
                                  List<PlayerRef> ignoredPlayers) {
+        spawnWave(modelAssetId, entityScale, world, casterGridX, casterGridZ, npcY, cells, ignoredPlayers, 0f);
+    }
+
+    public static void spawnWave(String modelAssetId, float entityScale,
+                                 World world,
+                                 int casterGridX, int casterGridZ, float npcY,
+                                 Set<SpellPatternCalculator.GridCell> cells,
+                                 List<PlayerRef> ignoredPlayers,
+                                 float yawRad) {
         if (cells.isEmpty()) return;
+
+        // Exclude caster cell
+        Set<SpellPatternCalculator.GridCell> filteredCells = new java.util.HashSet<>();
+        for (SpellPatternCalculator.GridCell c : cells) {
+            if (c.x != casterGridX || c.z != casterGridZ) filteredCells.add(c);
+        }
+        if (filteredCells.isEmpty()) return;
+
+        // Perpendicular offset (±0.5) along the axis perpendicular to cast direction
+        float perpX = (float) Math.sin(yawRad + Math.PI / 2.0);
+        float perpZ = (float) Math.cos(yawRad + Math.PI / 2.0);
 
         // Group cells by Chebyshev distance from caster — each distance ring is one "column"
         java.util.TreeMap<Integer, List<SpellPatternCalculator.GridCell>> byDist = new java.util.TreeMap<>();
-        for (SpellPatternCalculator.GridCell c : cells) {
+        for (SpellPatternCalculator.GridCell c : filteredCells) {
             int d = SpellPatternCalculator.getDistance(casterGridX, casterGridZ, c.x, c.z);
             byDist.computeIfAbsent(d, k -> new ArrayList<>()).add(c);
         }
@@ -146,13 +170,15 @@ public class SpellVisualEffect {
         if (columns.isEmpty()) return;
 
         int numCols     = columns.size();
-        long colStepMs  = 150L;   // time between each column appearing in one sweep
-        long waveLinger = 180L;   // how long each entity stays visible
+        long colStepMs  = 150L;
+        long waveLinger = 180L;
         long sweepDur   = numCols * colStepMs + waveLinger;
         int  numSweeps  = 3;
 
+        final float fpX = perpX, fpZ = perpZ;
+
         for (int sweep = 0; sweep < numSweeps; sweep++) {
-            long sweepStart = sweep * (sweepDur + 60L); // 60 ms gap between sweeps
+            long sweepStart = sweep * (sweepDur + 60L);
 
             for (int ci = 0; ci < numCols; ci++) {
                 final List<SpellPatternCalculator.GridCell> col = columns.get(ci);
@@ -166,10 +192,13 @@ public class SpellVisualEffect {
                         float wz = (c.z * 2.0f) + 1.0f;
                         Float groundY = SpellVisualManager.scanForGround(world, c.x, c.z, npcY + 30f, 45);
                         float wy = (groundY != null ? groundY : npcY) + 0.5f;
-                        Ref<EntityStore> ref = spawnStationary(modelAssetId, entityScale, world, wx, wy, wz, 0f);
-                        if (ref != null) colRefs.add(ref);
+                        // 2 entities per cell, offset ±0.5 perpendicular to cast direction
+                        for (float sign : new float[]{-0.5f, 0.5f}) {
+                            Ref<EntityStore> ref = spawnStationary(modelAssetId, entityScale, world,
+                                    wx + fpX * sign, wy, wz + fpZ * sign, yawRad);
+                            if (ref != null) colRefs.add(ref);
+                        }
                     }
-                    // Schedule despawn for this column's entities
                     SCHED.schedule(() -> world.execute(() -> {
                         for (Ref<EntityStore> r : colRefs) despawn(world, r);
                     }), waveLinger, TimeUnit.MILLISECONDS);

@@ -63,6 +63,11 @@ public enum ProjectileType {
 
     // ── Melee flash (instant, near-zero travel) ───────────────────────────────
     MELEE_FLASH          ("Arcane_Bolt",    null, 0.7f, "Sparkle_Explosion", 0.3f),
+    BOW_ARROW            ("Arrow_Iron",     null, 0.8f, "Sparkle_Explosion", 0.3f),
+    SWORD_SLASH          ("Arcane_Bolt",    null, 0.9f, "Sparkle_Explosion", 0.4f),
+    DAGGER_STAB          ("Acid_Bolt",      null, 0.7f, "Sparkle_Explosion", 0.3f),
+    GREATAXE_SWING       ("Thunder_Bolt",   null, 1.0f, "Explosion",         0.5f),
+    STAFF_SWING          ("Arcane_Bolt",    null, 0.8f, "Sparkle_Explosion", 0.3f),
 
     // ── Cone variants ────────────────────────────────────────────────────────
     ARCANE_CONE          ("Arcane_Bolt",    null, 0.9f, "Sparkle_Explosion", 0.3f),
@@ -156,6 +161,19 @@ public enum ProjectileType {
             case "stunning_strike":
             case "sneak_attack":
             case "divine_smite_melee":           return MELEE_FLASH;
+            // Class basic attacks
+            case "bow_shot":                         return BOW_ARROW;
+            case "sword_swing":                      return SWORD_SLASH;
+            case "greataxe_swing":                   return GREATAXE_SWING;
+            case "sneak_stab":                       return DAGGER_STAB;
+            case "shortsword_slash":                 return DAGGER_STAB;
+            case "morningstar_strike":               return SWORD_SLASH;
+            case "staff_strike":                     return STAFF_SWING;
+            case "unarmed_strike":                   return MELEE_FLASH;
+            case "paladin_strike":                   return SWORD_SLASH;
+            case "dagger_throw":                     return DAGGER_STAB;
+            case "pact_blade":                       return SWORD_SLASH;
+            case "quarterstaff":                     return STAFF_SWING;
 
             // ── Melee cone ──────────────────────────────────────────────────
             case "battle_cry":

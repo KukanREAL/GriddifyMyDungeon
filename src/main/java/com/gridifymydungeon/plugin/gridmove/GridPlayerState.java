@@ -37,6 +37,8 @@ public class GridPlayerState {
     // Freeze tracking
     public boolean isFrozen = false;
     public String freezeReason = null;
+    /** True after the first frozen message has been sent this freeze cycle. */
+    public boolean frozenMessageSent = false;
     /** Grid position where the NPC was frozen (used by post_cast unfreeze: player must walk back here). */
     public int frozenGridX = 0;
     public int frozenGridZ = 0;
@@ -118,5 +120,6 @@ public class GridPlayerState {
     public void unfreeze() {
         this.isFrozen = false;
         this.freezeReason = null;
+        this.frozenMessageSent = false;
     }
 }

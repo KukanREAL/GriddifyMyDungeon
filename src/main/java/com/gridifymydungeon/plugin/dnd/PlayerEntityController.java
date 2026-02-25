@@ -29,6 +29,10 @@ import com.hypixel.hytale.server.core.modules.entity.component.TransformComponen
 import com.hypixel.hytale.server.core.modules.entity.player.PlayerSkinComponent;
 import com.hypixel.hytale.server.core.modules.entity.tracker.EntityTrackerSystems;
 import com.hypixel.hytale.server.core.modules.entity.tracker.NetworkId;
+import com.hypixel.hytale.server.core.entity.AnimationUtils;
+import com.hypixel.hytale.protocol.packets.entities.EntityUpdates;
+import com.hypixel.hytale.server.core.universe.world.PlayerUtil;
+import com.hypixel.hytale.protocol.AnimationSlot;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.world.World;
 import com.hypixel.hytale.server.core.universe.world.chunk.ChunkColumn;
@@ -227,6 +231,106 @@ public class PlayerEntityController {
         } catch (Exception e) {
             System.err.println("[GridMove] [ERROR] Failed to check height: " + e.getMessage());
             return false;
+        }
+    }
+
+    /**
+     * Spawn a marker entity visible ONLY to the specified player.
+     * Spawns the entity, then sends EntityUpdates(removed) to every other player in view range,
+     * effectively giving that player a private entity.
+     *
+     * FIX 1: Removed non-existent AssetPackage import/usage.
+     * FIX 2: ModelAsset path corrected to ...model.config.ModelAsset.
+     * FIX 3: createDefaultModel -> createScaledModel(asset, 1.0f).
+     * FIX 4: store.createEntity() -> EntityStore.REGISTRY.newHolder().
+     * FIX 5: new PersistentModel(String) -> new PersistentModel(model.toReference()).
+     * FIX 6: new BoundingBox(float, float) -> new BoundingBox(model.getBoundingBox()).
+     * FIX 7: Lambda pRef is Ref<EntityStore> — getUuid/getPacketHandler moved to pRefComponent (PlayerRef).
+     *
+     * @return the spawned entity ref, or null on failure
+     */
+    public static com.hypixel.hytale.component.Ref<com.hypixel.hytale.server.core.universe.world.storage.EntityStore>
+    spawnPrivateEntity(World world, PlayerRef targetPlayer,
+                       String modelAssetId, float x, float y, float z) {
+        try {
+            // FIX 1+2: Use the correct fully-qualified ModelAsset path; AssetPackage removed entirely.
+            com.hypixel.hytale.server.core.asset.type.model.config.ModelAsset asset =
+                    com.hypixel.hytale.server.core.asset.type.model.config.ModelAsset.getAssetMap().getAsset(modelAssetId);
+            if (asset == null) {
+                System.err.println("[GridMove] spawnPrivateEntity: model not found: " + modelAssetId);
+                return null;
+            }
+
+            // FIX 3: createScaledModel instead of non-existent createDefaultModel
+            com.hypixel.hytale.server.core.asset.type.model.config.Model model =
+                    com.hypixel.hytale.server.core.asset.type.model.config.Model.createScaledModel(asset, 1.0f);
+
+            Store<com.hypixel.hytale.server.core.universe.world.storage.EntityStore> store =
+                    world.getEntityStore().getStore();
+
+            // FIX 4: EntityStore.REGISTRY.newHolder() instead of store.createEntity()
+            com.hypixel.hytale.component.Holder<com.hypixel.hytale.server.core.universe.world.storage.EntityStore> holder =
+                    EntityStore.REGISTRY.newHolder();
+
+            holder.addComponent(com.hypixel.hytale.server.core.modules.entity.component.TransformComponent.getComponentType(),
+                    new com.hypixel.hytale.server.core.modules.entity.component.TransformComponent(
+                            new com.hypixel.hytale.math.vector.Vector3d(x, y, z),
+                            new Vector3f(0, 0, 0)));
+            holder.addComponent(com.hypixel.hytale.server.core.modules.entity.component.ModelComponent.getComponentType(),
+                    new com.hypixel.hytale.server.core.modules.entity.component.ModelComponent(model));
+
+            // FIX 5: model.toReference() instead of raw String
+            holder.addComponent(com.hypixel.hytale.server.core.modules.entity.component.PersistentModel.getComponentType(),
+                    new com.hypixel.hytale.server.core.modules.entity.component.PersistentModel(model.toReference()));
+
+            int netId = store.getExternalData().takeNextNetworkId();
+            holder.addComponent(NetworkId.getComponentType(), new NetworkId(netId));
+
+            // FIX 6: model.getBoundingBox() instead of BoundingBox(float, float)
+            holder.addComponent(com.hypixel.hytale.server.core.modules.entity.component.BoundingBox.getComponentType(),
+                    new com.hypixel.hytale.server.core.modules.entity.component.BoundingBox(model.getBoundingBox()));
+
+            com.hypixel.hytale.component.Ref<com.hypixel.hytale.server.core.universe.world.storage.EntityStore> ref =
+                    store.addEntity(holder, com.hypixel.hytale.component.AddReason.SPAWN);
+
+            // FIX 7: TriConsumer is (Ref<EntityStore>, PlayerRef, ComponentAccessor).
+            //        pRef  = Ref<EntityStore>  — no getUuid/getPacketHandler
+            //        pRefComponent = PlayerRef — has getUuid() and getPacketHandler()
+            final int finalNetId = netId;
+            PlayerUtil.forEachPlayerThatCanSeeEntity(ref, (pRef, pRefComponent, ca) -> {
+                if (!pRefComponent.getUuid().equals(targetPlayer.getUuid())) {
+                    pRefComponent.getPacketHandler().writeNoCache(
+                            new EntityUpdates(new int[]{finalNetId}, null));
+                }
+            }, store);
+
+            return ref;
+        } catch (Exception e) {
+            System.err.println("[GridMove] [ERROR] spawnPrivateEntity failed: " + e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Play an animation on the player NPC entity.
+     * Uses AnimationSlot.Action which bypasses model animation validation,
+     * allowing any animation string to be broadcast to all viewers.
+     *
+     * @param animationId  the animation asset ID to play (e.g. "Longsword_Stab_Charged")
+     * @param itemAnimationsId  optional item animation set ID (e.g. "Stab"), or null
+     */
+    public static void playNpcAnimation(World world, GridPlayerState state,
+                                        String animationId, String itemAnimationsId) {
+        if (state.npcEntity == null || !state.npcEntity.isValid()) return;
+        try {
+            Store<com.hypixel.hytale.server.core.universe.world.storage.EntityStore> store =
+                    world.getEntityStore().getStore();
+            AnimationUtils.playAnimation(
+                    state.npcEntity, AnimationSlot.Action,
+                    itemAnimationsId, animationId,
+                    true, store);
+        } catch (Exception e) {
+            System.err.println("[GridMove] [ERROR] Failed to play NPC animation: " + e.getMessage());
         }
     }
 
