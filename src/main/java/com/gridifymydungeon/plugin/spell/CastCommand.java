@@ -223,6 +223,11 @@ public class CastCommand extends AbstractPlayerCommand {
         visualManager.showSpellArea(playerRef.getUuid(), initialCells, world, playerY);
 
         String label = spellLabel(spell);
+        System.out.println("[Griddify] [CAST] /Cast " + spell.getName()
+                + " pattern=" + spell.getPattern()
+                + " range=" + spell.getRangeGrids()
+                + " area=" + spell.getAreaGrids()
+                + " by=" + playerRef.getUsername());
         playerRef.sendMessage(Message.raw("[Griddify] CASTING: " + label).color("#FFD700"));
         playerRef.sendMessage(Message.raw("[Griddify] NPC frozen at (" + casterGridX + ", " + casterGridZ + ")").color("#FF6347"));
 

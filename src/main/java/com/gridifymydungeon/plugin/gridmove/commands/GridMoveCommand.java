@@ -178,12 +178,11 @@ public class GridMoveCommand extends AbstractPlayerCommand {
                     world, state, finalGridX, finalGridZ, playerPos.getY(), playerEntityRef);
 
             if (success) {
-                // Copy real player's armor + held item onto the NPC.
-                // Delay 500ms so the entity tracker populates visibleTo before we push the update.
-                final Ref<com.hypixel.hytale.server.core.universe.world.storage.EntityStore> npcRef = state.npcEntity;
+                // Snapshot and broadcast equipment to all viewers (including late-joiners).
+                final GridPlayerState finalState = state;
                 java.util.concurrent.Executors.newSingleThreadScheduledExecutor().schedule(() ->
-                                world.execute(() -> PlayerEntityController.broadcastEquipmentFromPlayer(
-                                        world.getEntityStore().getStore(), playerEntityRef, npcRef)),
+                                world.execute(() -> PlayerEntityController.broadcastAndStoreEquipment(
+                                        world, world.getEntityStore().getStore(), playerEntityRef, finalState)),
                         500L, java.util.concurrent.TimeUnit.MILLISECONDS);
 
                 manager.spawnDirectionHolograms(world, state);

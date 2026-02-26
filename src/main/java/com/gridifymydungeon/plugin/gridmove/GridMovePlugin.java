@@ -210,7 +210,6 @@ public class GridMovePlugin extends JavaPlugin {
 
         // Help command
         getCommandRegistry().registerCommand(new GridWeatherCommand(roleManager));
-        getCommandRegistry().registerCommand(new GridDebugCommand());
         getCommandRegistry().registerCommand(new com.gridifymydungeon.plugin.dnd.commands.TestFogCommand(gridMoveManager));
         getCommandRegistry().registerCommand(new GridHelpCommand(roleManager));
 

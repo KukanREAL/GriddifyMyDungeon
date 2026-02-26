@@ -6,6 +6,7 @@ import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.math.vector.Vector3d;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
+import java.util.UUID;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -70,6 +71,15 @@ public class GridPlayerState {
 
     // Action economy: only 1 action (spell/attack) per turn
     public boolean hasUsedAction = false;
+
+    // ── Fog-of-war test marker (private entity above NPC, visible only to owner) ──
+    public Ref<EntityStore> fogMarkerRef   = null;
+    public int              fogMarkerNetId = -1;
+
+    // ── Equipment snapshot (taken at /gridmove, re-sent to late viewers) ──
+    public String[] storedArmorIds   = null;
+    public String   storedRightHand  = null;
+    public String   storedLeftHand   = null;
 
     public SpellCastingState getSpellCastingState() { return spellCastingState; }
     public void setSpellCastingState(SpellCastingState state) { this.spellCastingState = state; }

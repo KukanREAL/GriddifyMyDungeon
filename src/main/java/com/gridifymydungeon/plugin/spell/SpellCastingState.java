@@ -97,7 +97,15 @@ public class SpellCastingState {
 
         SpellPattern pattern = spell.getPattern();
         if (pattern == SpellPattern.CONE || pattern == SpellPattern.LINE || pattern == SpellPattern.WALL) {
+            // Directional: player walks AROUND NPC to rotate
             this.direction = directionFromRelativePosition(playerGridX, playerGridZ);
+        } else if (pattern == SpellPattern.SINGLE_TARGET) {
+            // Aim-based: direction = caster facing toward the aim cell
+            int dx = playerGridX - casterGridX;
+            int dz = playerGridZ - casterGridZ;
+            if (dx != 0 || dz != 0) {
+                this.direction = directionFromRelativePosition(playerGridX, playerGridZ);
+            }
         }
     }
 

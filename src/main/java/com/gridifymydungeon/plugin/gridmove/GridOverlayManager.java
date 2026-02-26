@@ -137,7 +137,7 @@ public class GridOverlayManager {
 
         int centerX = gmState.currentGridX;
         int centerZ = gmState.currentGridZ;
-        float scanStart = gmState.npcY - 3.0f;
+        float scanStart = gmState.npcY + 2.0f;  // scan downward from above NPC to find ground AT NPC level
 
         List<ReachableCell> cells = new ArrayList<>();
         for (int dx = -GM_MAP_RADIUS; dx <= GM_MAP_RADIUS; dx++) {

@@ -103,6 +103,11 @@ public class PlayerPositionTracker {
                     state.unfreeze();
                     playerRef.sendMessage(com.hypixel.hytale.server.core.Message.raw(
                             "[Griddify] NPC unfrozen — ready to move!").color("#00FF7F"));
+                    // Re-spawn movement grid overlay (was removed at /castfinal)
+                    System.out.println("[GridMove] [GRID] post_cast unfreeze: re-spawning overlay for "
+                            + playerRef.getUsername());
+                    world.execute(() -> GridOverlayManager.spawnPlayerGridOverlay(
+                            world, state, collisionDetector, playerRef.getUuid()));
                 }
             } else if (newGridX == state.currentGridX && newGridZ == state.currentGridZ) {
                 // Collision-freeze: player walked back to NPC cell — unfreeze
@@ -302,6 +307,16 @@ public class PlayerPositionTracker {
 
                     float yaw = calculateFacingYaw(oldGridX, oldGridZ, newGridX, newGridZ);
                     PlayerEntityController.setNpcYaw(world, state, yaw);
+
+                    // Re-broadcast stored equipment to any newly-visible viewers
+                    if (state.storedArmorIds != null) {
+                        PlayerEntityController.rebroadcastStoredEquipment(
+                                world.getEntityStore().getStore(), state);
+                    }
+                    // Move fog-of-war test marker to follow NPC
+                    if (state.fogMarkerRef != null) {
+                        PlayerEntityController.moveFogMarker(world, state);
+                    }
 
                     gridMoveManager.moveDirectionHolograms(world, state);
 

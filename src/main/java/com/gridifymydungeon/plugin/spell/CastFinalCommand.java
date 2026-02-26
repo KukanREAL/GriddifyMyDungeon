@@ -421,7 +421,7 @@ public class CastFinalCommand extends AbstractPlayerCommand {
                                     finalType, world, finalCastState, tc.x, tc.z, npcYFinal, allPlayers, fScale, fLinger));
 
                         } else {
-                            // SINGLE_TARGET — stagger multiple targets by 120ms each
+                            // SINGLE_TARGET — stagger 120ms per target, rotate NPC to face each one
                             java.util.List<SpellCastingState.GridCell> targets =
                                     new java.util.ArrayList<>(castState.getConfirmedTargets());
                             if (targets.isEmpty())
@@ -429,13 +429,25 @@ public class CastFinalCommand extends AbstractPlayerCommand {
                             for (int i = 0; i < targets.size(); i++) {
                                 final SpellCastingState.GridCell tc = targets.get(i);
                                 final long delayMs = i * 120L;
+                                // Yaw from caster → this specific target cell
+                                int _dx = tc.x - castState.getCasterGridX();
+                                int _dz = tc.z - castState.getCasterGridZ();
+                                final float targetYaw = (float) Math.atan2(-_dx, -_dz);
+                                System.out.println("[Griddify] [CAST] SINGLE_TARGET idx=" + i
+                                        + " target=(" + tc.x + "," + tc.z + ") yaw=" + String.format("%.2f", targetYaw));
                                 if (delayMs == 0) {
-                                    world.execute(() -> launchSingleProjectile(
-                                            finalType, world, finalCastState, tc.x, tc.z, npcYFinal, allPlayers));
+                                    world.execute(() -> {
+                                        com.gridifymydungeon.plugin.dnd.PlayerEntityController
+                                                .setNpcYaw(world, state, targetYaw);
+                                        launchSingleProjectile(finalType, world, finalCastState, tc.x, tc.z, npcYFinal, allPlayers);
+                                    });
                                 } else {
                                     PROJ_SCHEDULER.schedule(() ->
-                                                    world.execute(() -> launchSingleProjectile(
-                                                            finalType, world, finalCastState, tc.x, tc.z, npcYFinal, allPlayers)),
+                                                    world.execute(() -> {
+                                                        com.gridifymydungeon.plugin.dnd.PlayerEntityController
+                                                                .setNpcYaw(world, state, targetYaw);
+                                                        launchSingleProjectile(finalType, world, finalCastState, tc.x, tc.z, npcYFinal, allPlayers);
+                                                    }),
                                             delayMs, java.util.concurrent.TimeUnit.MILLISECONDS);
                                 }
                             }
@@ -495,6 +507,9 @@ public class CastFinalCommand extends AbstractPlayerCommand {
                             break;
                         }
                         case "thunderwave": {
+                            System.out.println("[Griddify] [CAST] thunderwave cells=" + finalCells.size()
+                                    + " caster=(" + castState.getCasterGridX() + "," + castState.getCasterGridZ()
+                                    + ") aim=(" + aimGridX + "," + aimGridZ + ")");
                             float twYaw = directionToYaw(castState.getDirection());
                             world.execute(() -> SpellVisualEffect.spawnWave(
                                     "Thunderwave", 1.0f, world,
@@ -616,7 +631,7 @@ public class CastFinalCommand extends AbstractPlayerCommand {
                             Float hsGY = SpellVisualManager.scanForGround(world, castState.getCasterGridX(), castState.getCasterGridZ(), npcYFinal + 30f, 45);
                             float hsWy = (hsGY != null ? hsGY : npcYFinal) + 0.1f;
                             final float fHsWx = hsWx, fHsWy = hsWy, fHsWz = hsWz;
-                            world.execute(() -> SpellVisualEffect.spawnWithTimeout("Heal_Circle", 0.9f, world, fHsWx, fHsWy, fHsWz, 0f, 3000L));
+                            world.execute(() -> SpellVisualEffect.spawnWithTimeout("Heal_Circle", 0.6f, world, fHsWx, fHsWy, fHsWz, 0f, 3000L));
                             break;
                         }
                         case "aura_of_protection":
@@ -727,10 +742,14 @@ public class CastFinalCommand extends AbstractPlayerCommand {
 
         // Play attack animation on NPC for class basic attacks
         // spellKey is now in scope here — declared at the top of execute()
-        final String animForSpell = getNpcAnimationForSpell(spellKey);
+        final String[] animForSpell = getNpcAnimationForSpell(spellKey);
         if (animForSpell != null) {
+            final String _animId     = animForSpell[0];
+            final String _itemAnimId = animForSpell[1];
+            System.out.println("[Griddify] [ANIM] spell=" + spellKey
+                    + " animId=" + _animId + " itemAnimsId=" + _itemAnimId);
             world.execute(() -> com.gridifymydungeon.plugin.dnd.PlayerEntityController.playNpcAnimation(
-                    world, state, animForSpell, null));
+                    world, state, _animId, _itemAnimId));
         }
 
         state.clearSpellCastingState();
@@ -942,11 +961,19 @@ public class CastFinalCommand extends AbstractPlayerCommand {
      * Fighter sword_swing uses Longsword_Stab_Charged (the charged swing animation).
      * More attacks can be added here later once the mechanic is verified.
      */
-    private static String getNpcAnimationForSpell(String spellKey) {
+    /**
+     * Returns {animationId, itemAnimationsId} pair for a spell, or null if no animation.
+     * animationId = animation name inside the weapon set (SwingRight / SwingLeft / SwingUpLeft).
+     * itemAnimationsId = weapon's PlayerAnimationsId field ("Longsword" etc.).
+     * AnimationSlot.Action bypasses model-animation validation so any string is accepted.
+     */
+    private static String[] getNpcAnimationForSpell(String spellKey) {
         switch (spellKey) {
-            case "sword_swing":     return "Longsword_Stab_Charged";
-            case "paladin_strike":  return "Longsword_Stab_Charged";
-            default:                return null;
+            case "sword_swing":      return new String[]{"SwingRight",  "Longsword"};
+            case "paladin_strike":   return new String[]{"SwingUpLeft", "Longsword"};
+            case "sneak_stab":       return new String[]{"SwingLeft",   "Longsword"};
+            case "pact_blade":       return new String[]{"SwingUpLeft", "Longsword"};
+            default:                  return null;
         }
     }
 

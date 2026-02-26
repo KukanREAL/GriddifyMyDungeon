@@ -332,11 +332,11 @@ public class SpellDatabase {
 
         registerBase(new SpellData(
                 "Thunderwave",
-                1, 0, SpellPattern.WALL, 2,
+                1, 3, SpellPattern.CUBE, 1,
                 "2d8", DamageType.THUNDER,
                 ClassType.BARD, 1,
                 false, 0,
-                "15ft cube (5-wide wall in front of caster). CON save for half, push 2 grids on fail. +1d8 per level"
+                "15ft cube (movable 3x3, walk to aim it within 3 grids). Caster cell excluded. CON save half, push 2 grids. +1d8/level"
         ));
 
         registerBase(new SpellData(

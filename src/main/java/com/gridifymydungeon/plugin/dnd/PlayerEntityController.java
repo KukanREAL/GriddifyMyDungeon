@@ -251,7 +251,7 @@ public class PlayerEntityController {
      */
     public static com.hypixel.hytale.component.Ref<com.hypixel.hytale.server.core.universe.world.storage.EntityStore>
     spawnPrivateEntity(World world, PlayerRef targetPlayer,
-                       String modelAssetId, float x, float y, float z) {
+                       String modelAssetId, float x, float y, float z, int[] netIdOut) {
         try {
             // FIX 1+2: Use the correct fully-qualified ModelAsset path; AssetPackage removed entirely.
             com.hypixel.hytale.server.core.asset.type.model.config.ModelAsset asset =
@@ -284,6 +284,7 @@ public class PlayerEntityController {
                     new com.hypixel.hytale.server.core.modules.entity.component.PersistentModel(model.toReference()));
 
             int netId = store.getExternalData().takeNextNetworkId();
+            if (netIdOut != null && netIdOut.length > 0) netIdOut[0] = netId;
             holder.addComponent(NetworkId.getComponentType(), new NetworkId(netId));
 
             // FIX 6: model.getBoundingBox() instead of BoundingBox(float, float)
@@ -293,17 +294,8 @@ public class PlayerEntityController {
             com.hypixel.hytale.component.Ref<com.hypixel.hytale.server.core.universe.world.storage.EntityStore> ref =
                     store.addEntity(holder, com.hypixel.hytale.component.AddReason.SPAWN);
 
-            // FIX 7: TriConsumer is (Ref<EntityStore>, PlayerRef, ComponentAccessor).
-            //        pRef  = Ref<EntityStore>  — no getUuid/getPacketHandler
-            //        pRefComponent = PlayerRef — has getUuid() and getPacketHandler()
-            final int finalNetId = netId;
-            PlayerUtil.forEachPlayerThatCanSeeEntity(ref, (pRef, pRefComponent, ca) -> {
-                if (!pRefComponent.getUuid().equals(targetPlayer.getUuid())) {
-                    pRefComponent.getPacketHandler().writeNoCache(
-                            new EntityUpdates(new int[]{finalNetId}, null));
-                }
-            }, store);
-
+            System.out.println("[GridMove][Fog] spawnPrivateEntity OK netId=" + netId + " model=" + modelAssetId);
+            // Caller must call hideEntityFromOthers() ~200ms later (after entity-tracker tick)
             return ref;
         } catch (Exception e) {
             System.err.println("[GridMove] [ERROR] spawnPrivateEntity failed: " + e.getMessage());
@@ -436,6 +428,99 @@ public class PlayerEntityController {
         } catch (Exception e) {
             System.err.println("[GridMove] [Equipment] Failed: " + e.getMessage());
             e.printStackTrace();
+        }
+    }
+
+    // == Equipment: store snapshot + rebroadcast ==
+
+    public static void broadcastAndStoreEquipment(World world, Store<EntityStore> store,
+                                                  Ref<EntityStore> playerEntityRef,
+                                                  GridPlayerState state) {
+        if (state.npcEntity == null || !state.npcEntity.isValid()) return;
+        try {
+            Player playerComponent = store.getComponent(playerEntityRef, Player.getComponentType());
+            if (playerComponent == null) { System.err.println("[GridMove][Equip] Player null"); return; }
+            Inventory inventory = playerComponent.getInventory();
+            ItemContainer armorContainer = inventory.getArmor();
+            String[] armorIds = new String[armorContainer.getCapacity()];
+            Arrays.fill(armorIds, "");
+            armorContainer.forEachWithMeta((slot, item, acc) -> acc[slot] = item.getItemId(), armorIds);
+            ItemStack inHand  = inventory.getItemInHand();
+            ItemStack utility = inventory.getUtilityItem();
+            String right = (inHand  != null && !inHand.isEmpty())  ? inHand.getItemId()  : "Empty";
+            String left  = (utility != null && !utility.isEmpty()) ? utility.getItemId() : "Empty";
+            state.storedArmorIds  = armorIds;
+            state.storedRightHand = right;
+            state.storedLeftHand  = left;
+            System.out.println("[GridMove][Equip] Snapshot R=" + right + " L=" + left);
+            rebroadcastStoredEquipment(store, state);
+        } catch (Exception e) {
+            System.err.println("[GridMove][Equip] broadcastAndStore failed: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
+    public static void rebroadcastStoredEquipment(Store<EntityStore> store, GridPlayerState state) {
+        if (state.storedArmorIds == null) return;
+        if (state.npcEntity == null || !state.npcEntity.isValid()) return;
+        try {
+            EquipmentUpdate upd = new EquipmentUpdate();
+            upd.armorIds        = state.storedArmorIds;
+            upd.rightHandItemId = state.storedRightHand;
+            upd.leftHandItemId  = state.storedLeftHand;
+            EntityTrackerSystems.Visible vis =
+                    store.getComponent(state.npcEntity, EntityTrackerSystems.Visible.getComponentType());
+            if (vis == null) return;
+            int sent = 0;
+            if (vis.visibleTo != null)
+                for (EntityTrackerSystems.EntityViewer v : vis.visibleTo.values()) { v.queueUpdate(state.npcEntity, upd); sent++; }
+            if (vis.newlyVisibleTo != null)
+                for (EntityTrackerSystems.EntityViewer v : vis.newlyVisibleTo.values()) { v.queueUpdate(state.npcEntity, upd); sent++; }
+            System.out.println("[GridMove][Equip] Rebroadcast to " + sent + " viewer(s)");
+        } catch (Exception e) {
+            System.err.println("[GridMove][Equip] rebroadcast failed: " + e.getMessage());
+        }
+    }
+
+    // == Fog-of-war helpers ==
+
+    public static void hideEntityFromOthers(World world,
+                                            Ref<EntityStore> entityRef, PlayerRef owner, int networkId) {
+        try {
+            Store<EntityStore> store = world.getEntityStore().getStore();
+            int[] count = {0};
+            PlayerUtil.forEachPlayerThatCanSeeEntity(entityRef, (pRef, pRefComponent, ca) -> {
+                if (!pRefComponent.getUuid().equals(owner.getUuid())) {
+                    pRefComponent.getPacketHandler().writeNoCache(
+                            new EntityUpdates(new int[]{networkId}, null));
+                    count[0]++;
+                }
+            }, store);
+            System.out.println("[GridMove][Fog] hideEntityFromOthers: hid from " + count[0]);
+        } catch (Exception e) {
+            System.err.println("[GridMove][Fog] hideEntityFromOthers failed: " + e.getMessage());
+        }
+    }
+
+    public static void moveFogMarker(World world, GridPlayerState state) {
+        if (state.fogMarkerRef == null || !state.fogMarkerRef.isValid()) return;
+        try {
+            Store<EntityStore> store = world.getEntityStore().getStore();
+            com.hypixel.hytale.server.core.modules.entity.component.TransformComponent tc =
+                    store.getComponent(state.fogMarkerRef,
+                            com.hypixel.hytale.server.core.modules.entity.component.TransformComponent.getComponentType());
+            if (tc != null) {
+                float nx = (state.currentGridX * 2.0f) + 1.0f;
+                float ny = state.npcY + 2.0f;
+                float nz = (state.currentGridZ * 2.0f) + 1.0f;
+                tc.setPosition(new com.hypixel.hytale.math.vector.Vector3d(nx, ny, nz));
+                System.out.println("[GridMove][Fog] moveFogMarker -> (" + nx + "," + ny + "," + nz + ")");
+                if (state.fogMarkerNetId >= 0 && state.playerRef != null) {
+                    hideEntityFromOthers(world, state.fogMarkerRef, state.playerRef, state.fogMarkerNetId);
+                }
+            }
+        } catch (Exception e) {
+            System.err.println("[GridMove][Fog] moveFogMarker failed: " + e.getMessage());
         }
     }
 

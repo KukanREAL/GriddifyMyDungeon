@@ -68,10 +68,13 @@ public class CastTargetCommand extends AbstractPlayerCommand {
         int aimX = castState.getAimGridX();
         int aimZ = castState.getAimGridZ();
 
-        // ── CONE / LINE / WALL: snapshot the whole pattern once, ignore further calls ──
+        // ── CONE/LINE/WALL/CUBE/SPHERE/CYLINDER: lock on first /casttarget ──
         boolean isDirectionalPattern = pattern == SpellPattern.CONE
                 || pattern == SpellPattern.LINE
-                || pattern == SpellPattern.WALL;
+                || pattern == SpellPattern.WALL
+                || pattern == SpellPattern.CUBE
+                || pattern == SpellPattern.SPHERE
+                || pattern == SpellPattern.CYLINDER;
         if (isDirectionalPattern) {
             if (castState.hasConfirmedCells()) {
                 playerRef.sendMessage(Message.raw(

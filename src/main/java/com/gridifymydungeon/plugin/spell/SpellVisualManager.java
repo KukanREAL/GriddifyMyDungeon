@@ -244,7 +244,7 @@ public class SpellVisualManager {
                 Float groundY = scanForGround(world, cellX, cellZ, referenceY + 30.0f, 45);
                 if (groundY == null) groundY = referenceY;
 
-                Ref<EntityStore> ref = spawnTile(store, model, wx, groundY + 0.02f, wz);
+                Ref<EntityStore> ref = spawnTile(store, model, wx, groundY + 0.005f, wz); // lowest layer: below Grid_Player(0.02) Grid_Difficult(0.02) Grid_Spell(0.06)
                 if (ref != null) tiles.add(ref);
             }
         }
