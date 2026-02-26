@@ -72,7 +72,7 @@ public class TestFogCommand extends AbstractPlayerCommand {
         }
 
         float wx = (state.currentGridX * 2.0f) + 1.0f;
-        float wy = state.npcY + 2.0f;
+        float wy = state.npcY;        // same height as player standing (ground level)
         float wz = (state.currentGridZ * 2.0f) + 1.0f;
 
         final PlayerRef fPlayer = playerRef;

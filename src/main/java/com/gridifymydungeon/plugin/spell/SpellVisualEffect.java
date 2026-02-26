@@ -324,7 +324,7 @@ public class SpellVisualEffect {
                                      float casterWx, float casterWy, float casterWz,
                                      java.util.List<float[]> targetPositions) {
         // Big circle under the caster
-        spawnWithTimeout("Heal_Circle", 1.5f, world, casterWx, casterWy, casterWz, 0f, 3000L);
+        spawnWithTimeout("Heal_Circle", 1.1f, world, casterWx, casterWy, casterWz, 0f, 3000L);
         // Individual Heal_One per affected target
         for (float[] pos : targetPositions) {
             spawnWithTimeout("Heal_One", 1.0f, world, pos[0], pos[1], pos[2], 0f, 3000L);

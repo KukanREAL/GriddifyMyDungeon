@@ -1,6 +1,6 @@
 {
-  "Model": "Items/Empty.blockymodel",
-  "Texture": "Items/Empty.png",
+  "Model": "Items/Fog_Of_War.blockymodel",
+  "Texture": "Items/FogOfWar.png",
   "HitBox": {
     "Max": {
       "X": 0.15,
@@ -15,9 +15,5 @@
   },
   "MinScale": 1,
   "MaxScale": 1,
-  "Particles": [
-    {
-      "SystemId": "Totem_Heal_AoE"
-    }
-  ]
+  "Trails": []
 }

@@ -29,6 +29,12 @@ public class GridMoveManager {
 
     private final Map<UUID, GridPlayerState> playerStates = new ConcurrentHashMap<>();
 
+    /** Whether fog-of-war is currently active (toggled by GM via /FogOfWar). */
+    private volatile boolean fogOfWarActive = false;
+
+    public boolean isFogOfWarActive() { return fogOfWarActive; }
+    public void setFogOfWarActive(boolean v) { fogOfWarActive = v; }
+
     /**
      * Get or create state for a player
      * UPDATED: Now stores PlayerRef in the state for later retrieval

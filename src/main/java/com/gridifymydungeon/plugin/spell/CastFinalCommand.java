@@ -735,8 +735,27 @@ public class CastFinalCommand extends AbstractPlayerCommand {
         visualManager.clearSpellVisuals(playerRef.getUuid(), world);
         visualManager.clearRangeOverlay(playerRef.getUuid(), world);
 
-        // Rotate NPC to face the cast direction
-        float castYaw = directionToYaw(castState.getDirection());
+        // Rotate NPC to face the cast direction.
+        // For CUBE/SPHERE patterns the stored direction may be stale (body yaw at /cast time),
+        // so we recompute from caster → aim cell instead.
+        Direction8 castDir = castState.getDirection();
+        SpellPattern castPatternForYaw = spell.getPattern();
+        if (castPatternForYaw == SpellPattern.CUBE || castPatternForYaw == SpellPattern.SPHERE
+                || castPatternForYaw == SpellPattern.CYLINDER) {
+            int adx = aimGridX - castState.getCasterGridX();
+            int adz = aimGridZ - castState.getCasterGridZ();
+            if (adx != 0 || adz != 0) {
+                int sx = Integer.compare(adx, 0);
+                int sz = Integer.compare(adz, 0);
+                for (Direction8 d : Direction8.values()) {
+                    if (d.getDeltaX() == sx && d.getDeltaZ() == sz) { castDir = d; break; }
+                }
+            }
+        }
+        float castYaw = directionToYaw(castDir);
+        System.out.println("[Griddify] [YAW] castfinal spell=" + spell.getName()
+                + " dir=" + castDir.name() + " yawRad=" + String.format("%.2f", castYaw)
+                + " aimGrid=(" + aimGridX + "," + aimGridZ + ")");
         final float fCastYaw = castYaw;
         world.execute(() -> com.gridifymydungeon.plugin.dnd.PlayerEntityController.setNpcYaw(world, state, fCastYaw));
 

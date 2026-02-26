@@ -3,6 +3,7 @@ package com.gridifymydungeon.plugin.dnd.commands;
 import com.gridifymydungeon.plugin.dnd.CombatManager;
 import com.gridifymydungeon.plugin.dnd.RoleManager;
 import com.gridifymydungeon.plugin.gridmove.GridMoveManager;
+import com.gridifymydungeon.plugin.dnd.commands.FogOfWarCommand;
 import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.component.Store;
 import com.hypixel.hytale.server.core.Message;
@@ -24,6 +25,7 @@ public class CombatCommand extends AbstractPlayerCommand {
     private final RoleManager roleManager;
     private final CombatManager combatManager;
     private final GridMoveManager gridMoveManager;
+    private FogOfWarCommand fogOfWarCommand;  // set via setter after construction
 
     public CombatCommand(RoleManager roleManager, CombatManager combatManager, GridMoveManager gridMoveManager) {
         super("combat", "Start/end combat mode (GM only)");
@@ -31,6 +33,8 @@ public class CombatCommand extends AbstractPlayerCommand {
         this.combatManager = combatManager;
         this.gridMoveManager = gridMoveManager;
     }
+
+    public void setFogOfWarCommand(FogOfWarCommand cmd) { this.fogOfWarCommand = cmd; }
 
     @Override
     protected void execute(@Nonnull CommandContext context, @Nonnull Store<EntityStore> store,
@@ -54,6 +58,11 @@ public class CombatCommand extends AbstractPlayerCommand {
             }
             broadcastTurnOrder(turnOrder, 0, "COMBAT STARTED!", combatManager.getRoundNumber());
             System.out.println("[Griddify] [COMBAT] Combat mode started - " + turnOrder.size() + " participants");
+            // If fog of war is active, spawn markers for all players who joined after /FogOfWar was toggled
+            if (fogOfWarCommand != null && gridMoveManager.isFogOfWarActive()) {
+                fogOfWarCommand.spawnAllFogMarkers(world);
+                System.out.println("[FogOfWar] Auto-spawned fog markers on combat start");
+            }
         }
     }
 

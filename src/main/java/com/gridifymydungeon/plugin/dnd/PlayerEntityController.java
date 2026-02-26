@@ -511,7 +511,7 @@ public class PlayerEntityController {
                             com.hypixel.hytale.server.core.modules.entity.component.TransformComponent.getComponentType());
             if (tc != null) {
                 float nx = (state.currentGridX * 2.0f) + 1.0f;
-                float ny = state.npcY + 2.0f;
+                float ny = state.npcY;        // same height as player standing
                 float nz = (state.currentGridZ * 2.0f) + 1.0f;
                 tc.setPosition(new com.hypixel.hytale.math.vector.Vector3d(nx, ny, nz));
                 System.out.println("[GridMove][Fog] moveFogMarker -> (" + nx + "," + ny + "," + nz + ")");

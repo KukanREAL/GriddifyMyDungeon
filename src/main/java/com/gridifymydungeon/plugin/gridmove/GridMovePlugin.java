@@ -132,6 +132,9 @@ public class GridMovePlugin extends JavaPlugin {
 
         // Declared early — both needed before EndTurnCommand
         CombatCommand combatCommand = new CombatCommand(roleManager, combatManager, gridMoveManager);
+        com.gridifymydungeon.plugin.dnd.commands.FogOfWarCommand fogOfWarCommand =
+                new com.gridifymydungeon.plugin.dnd.commands.FogOfWarCommand(gridMoveManager, roleManager);
+        combatCommand.setFogOfWarCommand(fogOfWarCommand);
         SpellVisualManager spellVisualManager = new SpellVisualManager(gridMoveManager);
         positionTracker.setSpellVisualManager(spellVisualManager);
         gmPositionTracker.setSpellVisualManager(spellVisualManager);
@@ -211,6 +214,7 @@ public class GridMovePlugin extends JavaPlugin {
         // Help command
         getCommandRegistry().registerCommand(new GridWeatherCommand(roleManager));
         getCommandRegistry().registerCommand(new com.gridifymydungeon.plugin.dnd.commands.TestFogCommand(gridMoveManager));
+        getCommandRegistry().registerCommand(fogOfWarCommand);
         getCommandRegistry().registerCommand(new GridHelpCommand(roleManager));
 
         getLogger().at(Level.INFO).log("Registered all commands successfully!");

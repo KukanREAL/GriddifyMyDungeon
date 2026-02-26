@@ -208,17 +208,23 @@ public class SpellPatternCalculator {
     private static Set<GridCell> calculateWall(Direction8 direction, int originX, int originZ, int length) {
         Set<GridCell> cells = new HashSet<>();
 
-        // Perpendicular to direction
-        int dx = direction.getDeltaX();
-        int dz = direction.getDeltaZ();
-        int perpDx = -dz;
-        int perpDz = dx;
+        // Forward direction (facing direction of caster)
+        int fdx = direction.getDeltaX();
+        int fdz = direction.getDeltaZ();
+        // Perpendicular (sideways)
+        int perpDx = -fdz;
+        int perpDz =  fdx;
 
-        // Create wall perpendicular to facing
-        for (int i = -length/2; i <= length/2; i++) {
-            cells.add(new GridCell(originX + perpDx * i, originZ + perpDz * i));
+        int halfWidth = length / 2;          // area=2 → halfWidth=1 → 3 cells wide (-1,0,+1)
+        int depth     = halfWidth * 2 + 1;   // area=2 → depth=3 → 3 rows deep (1..3)
+
+        for (int d = 1; d <= depth; d++) {           // forward rows, never includes caster (d=0)
+            for (int i = -halfWidth; i <= halfWidth; i++) {  // perpendicular width
+                cells.add(new GridCell(
+                        originX + fdx * d + perpDx * i,
+                        originZ + fdz * d + perpDz * i));
+            }
         }
-
         return cells;
     }
 
