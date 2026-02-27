@@ -80,6 +80,16 @@ public class CastFinalCommand extends AbstractPlayerCommand {
         final String spellKey = spell.getName().toLowerCase()
                 .replace(" ", "_").replace("-", "_");
 
+        // ── Weapon-type flags (used for animation delay and stop-animation) ──
+        final String _rh = state.storedRightHand != null ? state.storedRightHand.toLowerCase() : "";
+        final boolean isBowShot         = spellKey.equals("bow_shot");
+        final boolean isStaffWeapon     = _rh.startsWith("weapon_staff");
+        final boolean isSpellbookWeapon = _rh.startsWith("weapon_spellbook");
+        // effectDelayMs: how long after animation starts before the projectile/effect fires
+        final long effectDelayMs = isBowShot ? 2500L
+                : (isStaffWeapon || isSpellbookWeapon) ? 2000L
+                : 0L;
+
         int aimGridX = castState.getAimGridX();
         int aimGridZ = castState.getAimGridZ();
 
@@ -422,244 +432,80 @@ public class CastFinalCommand extends AbstractPlayerCommand {
 
                         } else {
                             // SINGLE_TARGET — stagger 120ms per target, rotate NPC to face each one
+                            // Melee attacks (range≤1) skip projectile; bow/staff/spellbook delay it.
+                            boolean isMeleeAttack = spell.getRangeGrids() <= 1
+                                    && getNpcAnimationForSpell(spellKey, state.storedRightHand) != null;
                             java.util.List<SpellCastingState.GridCell> targets =
                                     new java.util.ArrayList<>(castState.getConfirmedTargets());
                             if (targets.isEmpty())
                                 targets.add(new SpellCastingState.GridCell(aimGridX, aimGridZ));
                             for (int i = 0; i < targets.size(); i++) {
                                 final SpellCastingState.GridCell tc = targets.get(i);
-                                final long delayMs = i * 120L;
+                                final long staggerMs = i * 120L;
                                 // Yaw from caster → this specific target cell
                                 int _dx = tc.x - castState.getCasterGridX();
                                 int _dz = tc.z - castState.getCasterGridZ();
                                 final float targetYaw = (float) Math.atan2(-_dx, -_dz);
                                 System.out.println("[Griddify] [CAST] SINGLE_TARGET idx=" + i
-                                        + " target=(" + tc.x + "," + tc.z + ") yaw=" + String.format("%.2f", targetYaw));
-                                if (delayMs == 0) {
-                                    world.execute(() -> {
-                                        com.gridifymydungeon.plugin.dnd.PlayerEntityController
-                                                .setNpcYaw(world, state, targetYaw);
-                                        launchSingleProjectile(finalType, world, finalCastState, tc.x, tc.z, npcYFinal, allPlayers);
-                                    });
+                                        + " target=(" + tc.x + "," + tc.z + ") yaw=" + String.format("%.2f", targetYaw)
+                                        + (isMeleeAttack ? " [MELEE]" : "")
+                                        + (effectDelayMs > 0 ? " [delay=" + effectDelayMs + "ms]" : ""));
+                                if (isMeleeAttack) {
+                                    // Melee: rotate NPC only, no projectile
+                                    if (staggerMs == 0) {
+                                        world.execute(() ->
+                                                com.gridifymydungeon.plugin.dnd.PlayerEntityController
+                                                        .setNpcYaw(world, state, targetYaw));
+                                    } else {
+                                        PROJ_SCHEDULER.schedule(() ->
+                                                        world.execute(() ->
+                                                                com.gridifymydungeon.plugin.dnd.PlayerEntityController
+                                                                        .setNpcYaw(world, state, targetYaw)),
+                                                staggerMs, java.util.concurrent.TimeUnit.MILLISECONDS);
+                                    }
                                 } else {
-                                    PROJ_SCHEDULER.schedule(() ->
-                                                    world.execute(() -> {
-                                                        com.gridifymydungeon.plugin.dnd.PlayerEntityController
-                                                                .setNpcYaw(world, state, targetYaw);
-                                                        launchSingleProjectile(finalType, world, finalCastState, tc.x, tc.z, npcYFinal, allPlayers);
-                                                    }),
-                                            delayMs, java.util.concurrent.TimeUnit.MILLISECONDS);
+                                    // Rotate immediately, launch projectile after effectDelayMs
+                                    final long launchDelay = staggerMs + effectDelayMs;
+                                    if (staggerMs == 0) {
+                                        world.execute(() ->
+                                                com.gridifymydungeon.plugin.dnd.PlayerEntityController
+                                                        .setNpcYaw(world, state, targetYaw));
+                                    } else {
+                                        PROJ_SCHEDULER.schedule(() ->
+                                                        world.execute(() ->
+                                                                com.gridifymydungeon.plugin.dnd.PlayerEntityController
+                                                                        .setNpcYaw(world, state, targetYaw)),
+                                                staggerMs, java.util.concurrent.TimeUnit.MILLISECONDS);
+                                    }
+                                    if (launchDelay == 0) {
+                                        world.execute(() ->
+                                                launchSingleProjectile(finalType, world, finalCastState,
+                                                        tc.x, tc.z, npcYFinal, allPlayers));
+                                    } else {
+                                        PROJ_SCHEDULER.schedule(() ->
+                                                        world.execute(() ->
+                                                                launchSingleProjectile(finalType, world, finalCastState,
+                                                                        tc.x, tc.z, npcYFinal, allPlayers)),
+                                                launchDelay, java.util.concurrent.TimeUnit.MILLISECONDS);
+                                    }
                                 }
                             }
                         }
                     }
 
                     // ── STATIONARY / WAVE / RAIN effects ─────────────────────
-                    switch (spellKey) {
-                        case "entangle": {
-                            // Spawn 4 Entangle entities per grid cell (4 block corners)
-                            java.util.List<com.hypixel.hytale.component.Ref<com.hypixel.hytale.server.core.universe.world.storage.EntityStore>> entangleRefs =
-                                    SpellVisualEffect.spawnEntangle(world, finalCells, npcYFinal);
-                            // Register difficult terrain cells
-                            for (SpellPatternCalculator.GridCell c : finalCells) {
-                                TerrainManager.addDifficultCell(c.x, c.z);
-                            }
-                            // Auto-despawn after 30 s if not in combat, or persist in combat.
-                            // Also remove difficult terrain cells when entities despawn.
-                            if (!combatSettings.isCombatActive()) {
-                                final java.util.Set<SpellPatternCalculator.GridCell> entangleCells =
-                                        new java.util.HashSet<>(finalCells);
-                                PROJ_SCHEDULER.schedule(() -> world.execute(() -> {
-                                    for (com.hypixel.hytale.component.Ref<com.hypixel.hytale.server.core.universe.world.storage.EntityStore> r : entangleRefs) {
-                                        SpellVisualEffect.despawn(world, r);
-                                    }
-                                    for (SpellPatternCalculator.GridCell c : entangleCells) {
-                                        TerrainManager.removeDifficultCell(c.x, c.z);
-                                    }
-                                }), 30000L, java.util.concurrent.TimeUnit.MILLISECONDS);
-                            }
-                            break;
-                        }
-                        case "moonbeam": {
-                            SpellCastingState.GridCell tc = castState.getConfirmedTargets().isEmpty()
-                                    ? new SpellCastingState.GridCell(aimGridX, aimGridZ)
-                                    : castState.getConfirmedTargets().get(0);
-                            final int mx = tc.x, mz = tc.z;
-                            Float groundY = SpellVisualManager.scanForGround(
-                                    world, mx, mz, npcYFinal + 30f, 45);
-                            float wy = groundY != null ? groundY : npcYFinal;
-                            world.execute(() -> SpellVisualEffect.spawnStationary(
-                                    "Moon_Beam", 1.0f, world,
-                                    (mx * 2.0) + 1.0, wy, (mz * 2.0) + 1.0, 0f));
-                            break;
-                        }
-                        case "sunbeam": {
-                            float sunYaw = directionToYaw(castState.getDirection());
-                            float ox = (castState.getCasterGridX() * 2.0f) + 1.0f;
-                            float oz = (castState.getCasterGridZ() * 2.0f) + 1.0f;
-                            Float groundY = SpellVisualManager.scanForGround(
-                                    world, castState.getCasterGridX(), castState.getCasterGridZ(),
-                                    npcYFinal + 30f, 45);
-                            float wy = (groundY != null ? groundY : npcYFinal) + 1.0f;
-                            final float fYaw = sunYaw, fOx = ox, fWy = wy, fOz = oz;
-                            world.execute(() -> SpellVisualEffect.spawnStationary(
-                                    "Sun_Beam", 1.0f, world, fOx, fWy, fOz, fYaw));
-                            break;
-                        }
-                        case "thunderwave": {
-                            System.out.println("[Griddify] [CAST] thunderwave cells=" + finalCells.size()
-                                    + " caster=(" + castState.getCasterGridX() + "," + castState.getCasterGridZ()
-                                    + ") aim=(" + aimGridX + "," + aimGridZ + ")");
-                            float twYaw = directionToYaw(castState.getDirection());
-                            world.execute(() -> SpellVisualEffect.spawnWave(
-                                    "Thunderwave", 1.0f, world,
-                                    castState.getCasterGridX(), castState.getCasterGridZ(),
-                                    npcYFinal, finalCells, allPlayers, twYaw));
-                            break;
-                        }
-                        case "ice_storm": {
-                            world.execute(() -> SpellVisualEffect.spawnIceStorm(
-                                    world, finalCells, npcYFinal, allPlayers));
-                            break;
-                        }
-                        case "bardic_inspiration":
-                        case "vicious_mockery":
-                        case "bless":
-                        case "hex":
-                        case "hunters_mark":
-                        case "power_word_stun": {
-                            // Buff: spawn Mark under the target cell
-                            SpellCastingState.GridCell bt = castState.getConfirmedTargets().isEmpty()
-                                    ? new SpellCastingState.GridCell(aimGridX, aimGridZ)
-                                    : castState.getConfirmedTargets().get(0);
-                            world.execute(() -> SpellVisualEffect.spawnMark(world, bt.x, bt.z, npcYFinal, 4000L));
-                            break;
-                        }
-                        case "wind_dash":
-                        case "shadow_dash":
-                        case "shadow_step": {
-                            // Teleport: Mark at destination then Mark at origin briefly
-                            float casterWx = (castState.getCasterGridX() * 2.0f) + 1.0f;
-                            float casterWz = (castState.getCasterGridZ() * 2.0f) + 1.0f;
-                            Float casterGY = SpellVisualManager.scanForGround(world,
-                                    castState.getCasterGridX(), castState.getCasterGridZ(), npcYFinal + 30f, 45);
-                            float casterWy = (casterGY != null ? casterGY : npcYFinal) + 0.05f;
-                            world.execute(() -> {
-                                SpellVisualEffect.spawnWithTimeout("Mark", 1.0f, world,
-                                        casterWx, casterWy, casterWz, 0f, 600L); // origin flash
-                                SpellCastingState.GridCell dt = castState.getConfirmedTargets().isEmpty()
-                                        ? new SpellCastingState.GridCell(aimGridX, aimGridZ)
-                                        : castState.getConfirmedTargets().get(0);
-                                SpellVisualEffect.spawnMark(world, dt.x, dt.z, npcYFinal, 2500L);
-                            });
-                            break;
-                        }
-                        case "call_lightning": {
-                            // Repeated lightning strikes at target area over 3 seconds
-                            SpellCastingState.GridCell tc = castState.getConfirmedTargets().isEmpty()
-                                    ? new SpellCastingState.GridCell(aimGridX, aimGridZ)
-                                    : castState.getConfirmedTargets().get(0);
-                            final int cx = tc.x, cz = tc.z;
-                            for (int strike = 0; strike < 4; strike++) {
-                                final long delay = strike * 750L;
-                                PROJ_SCHEDULER.schedule(() -> world.execute(() -> {
-                                    float wx = (cx * 2.0f) + 1.0f;
-                                    float wz = (cz * 2.0f) + 1.0f;
-                                    Float gy = SpellVisualManager.scanForGround(world, cx, cz, npcYFinal + 30f, 45);
-                                    float wy = (gy != null ? gy : npcYFinal) + 0.5f;
-                                    SpellVisualEffect.spawnWithTimeout("Lightning_Bolt", 1.0f, world, wx, wy + 8f, wz, 0f, 50L);
-                                    SpellVisualEffect.spawnWithTimeout("Explosion", 1.0f, world, wx, wy, wz, 0f, 400L);
-                                }), delay, java.util.concurrent.TimeUnit.MILLISECONDS);
-                            }
-                            break;
-                        }
-                        case "spirit_guardians": {
-                            float ox2 = (castState.getCasterGridX() * 2.0f) + 1.0f;
-                            float oz2 = (castState.getCasterGridZ() * 2.0f) + 1.0f;
-                            Float gy2 = SpellVisualManager.scanForGround(world, castState.getCasterGridX(), castState.getCasterGridZ(), npcYFinal + 30f, 45);
-                            float wy2 = (gy2 != null ? gy2 : npcYFinal) + 1.0f;
-                            final float fOx2 = ox2, fWy2 = wy2, fOz2 = oz2;
-                            world.execute(() -> SpellVisualEffect.spawnWithTimeout("Arcane_Bolt", 2.5f, world, fOx2, fWy2, fOz2, 0f, 2500L));
-                            break;
-                        }
-
-                        // ── Self-buffs: Mark on caster ─────────────────────────────────
-                        case "rage":
-                        case "reckless_attack":
-                        case "shield":
-                        case "iron_body":
-                        case "evasive_roll":
-                        case "arcane_ward":
-                        case "spell_resistance":
-                        case "portent":
-                        case "greater_portent":
-                        case "third_eye":
-                        case "expert_divination":
-                        case "overchannel":
-                        case "potent_cantrip":
-                        case "sculpt_spells":
-                        case "empowered_evocation":
-                        case "blessed_healer":
-                        case "disciple_of_life":
-                        case "supreme_healing":
-                        case "preserve_life": {
-                            // Buff flash: Mark under caster
-                            world.execute(() -> SpellVisualEffect.spawnMark(world,
-                                    castState.getCasterGridX(), castState.getCasterGridZ(), npcYFinal, 2500L));
-                            break;
-                        }
-
-                        // ── Frost aura: Frost_Bolt ring ────────────────────────────────
-                        case "frost_shell": {
-                            int fsCasterX = castState.getCasterGridX(), fsCasterZ = castState.getCasterGridZ();
-                            for (SpellPatternCalculator.GridCell c : finalCells) {
-                                if (c.x == fsCasterX && c.z == fsCasterZ) continue; // skip caster cell
-                                float wx = (c.x * 2.0f) + 1.0f;
-                                float wz = (c.z * 2.0f) + 1.0f;
-                                Float groundY = SpellVisualManager.scanForGround(world, c.x, c.z, npcYFinal + 30f, 45);
-                                float wy = (groundY != null ? groundY : npcYFinal) + 0.5f;
-                                world.execute(() -> SpellVisualEffect.spawnWithTimeout("Frost_Bolt", 0.8f, world, wx, wy, wz, 0f, 2000L));
-                            }
-                            break;
-                        }
-
-                        // ── Healing auras: Heal_Circle under caster ────────────────────
-                        case "healing_song": {
-                            // 33% smaller than other healing auras
-                            float hsWx = (castState.getCasterGridX() * 2.0f) + 1.0f;
-                            float hsWz = (castState.getCasterGridZ() * 2.0f) + 1.0f;
-                            Float hsGY = SpellVisualManager.scanForGround(world, castState.getCasterGridX(), castState.getCasterGridZ(), npcYFinal + 30f, 45);
-                            float hsWy = (hsGY != null ? hsGY : npcYFinal) + 0.1f;
-                            final float fHsWx = hsWx, fHsWy = hsWy, fHsWz = hsWz;
-                            world.execute(() -> SpellVisualEffect.spawnWithTimeout("Heal_Circle", 0.6f, world, fHsWx, fHsWy, fHsWz, 0f, 3000L));
-                            break;
-                        }
-                        case "aura_of_protection":
-                        case "hurricane_strike": {
-                            float casterWx = (castState.getCasterGridX() * 2.0f) + 1.0f;
-                            float casterWz = (castState.getCasterGridZ() * 2.0f) + 1.0f;
-                            Float cGY = SpellVisualManager.scanForGround(world, castState.getCasterGridX(), castState.getCasterGridZ(), npcYFinal + 30f, 45);
-                            float cWy = (cGY != null ? cGY : npcYFinal) + 0.1f;
-                            final float fCWx = casterWx, fCWy = cWy, fCWz = casterWz;
-                            world.execute(() -> SpellVisualEffect.spawnWithTimeout("Heal_Circle", 2.0f, world, fCWx, fCWy, fCWz, 0f, 3000L));
-                            break;
-                        }
-
-                        // ── Hypnotic Pattern: Arcane_Bolt pillars in area ─────────────
-                        case "hypnotic_pattern": {
-                            for (SpellPatternCalculator.GridCell c : finalCells) {
-                                float wx = (c.x * 2.0f) + 1.0f;
-                                float wz = (c.z * 2.0f) + 1.0f;
-                                Float groundY = SpellVisualManager.scanForGround(world, c.x, c.z, npcYFinal + 30f, 45);
-                                float wy = (groundY != null ? groundY : npcYFinal) + 0.5f;
-                                world.execute(() -> SpellVisualEffect.spawnWithTimeout("Arcane_Bolt", 0.9f, world, wx, wy, wz, 0f, 3000L));
-                            }
-                            break;
-                        }
-
-                        // ── Wild Shape: Mark at caster feet (transform flash) ──────────
-                        // (actual model swap handled by WildShapeManager above; this just
-                        //  adds a ground Mark as visual feedback that the transform happened)
+                    // For staff/spellbook: delay the visual by effectDelayMs so the
+                    // charging animation plays before the effect lands.
+                    if (effectDelayMs > 0) {
+                        PROJ_SCHEDULER.schedule(() -> world.execute(() ->
+                                        runAreaEffects(spellKey, world, finalCastState,
+                                                finalCells, npcYFinal, allPlayers, combatSettings,
+                                                aimGridX, aimGridZ)),
+                                effectDelayMs, java.util.concurrent.TimeUnit.MILLISECONDS);
+                    } else {
+                        runAreaEffects(spellKey, world, finalCastState,
+                                finalCells, npcYFinal, allPlayers, combatSettings,
+                                aimGridX, aimGridZ);
                     }
                 }
 
@@ -761,7 +607,7 @@ public class CastFinalCommand extends AbstractPlayerCommand {
 
         // Play attack animation on NPC for class basic attacks
         // spellKey is now in scope here — declared at the top of execute()
-        final String[] animForSpell = getNpcAnimationForSpell(spellKey);
+        final String[] animForSpell = getNpcAnimationForSpell(spellKey, state.storedRightHand);
         if (animForSpell != null) {
             final String _animId     = animForSpell[0];
             final String _itemAnimId = animForSpell[1];
@@ -769,6 +615,12 @@ public class CastFinalCommand extends AbstractPlayerCommand {
                     + " animId=" + _animId + " itemAnimsId=" + _itemAnimId);
             world.execute(() -> com.gridifymydungeon.plugin.dnd.PlayerEntityController.playNpcAnimation(
                     world, state, _animId, _itemAnimId));
+            // Staff/spellbook charging animations loop — stop after 5s
+            if (isStaffWeapon || isSpellbookWeapon) {
+                PROJ_SCHEDULER.schedule(() -> world.execute(() ->
+                                com.gridifymydungeon.plugin.dnd.PlayerEntityController.stopNpcAnimation(world, state)),
+                        5000L, java.util.concurrent.TimeUnit.MILLISECONDS);
+            }
         }
 
         state.clearSpellCastingState();
@@ -826,6 +678,226 @@ public class CastFinalCommand extends AbstractPlayerCommand {
 
         System.out.println("[Griddify] [CASTFINAL] " + playerRef.getUsername() + " cast " +
                 spell.getName() + " for " + totalDamage + " damage (" + monstersHit + " targets)");
+    }
+
+
+    // ── Area spell effects — deferred by runAreaEffects() to allow effectDelayMs scheduling ──
+    private static void runAreaEffects(
+            String spellKey,
+            World world,
+            SpellCastingState castState,
+            Set<SpellPatternCalculator.GridCell> finalCells,
+            float npcYFinal,
+            List<PlayerRef> allPlayers,
+            CombatSettings combatSettings,
+            int aimGridX,
+            int aimGridZ) {
+        switch (spellKey) {
+            case "entangle": {
+                // Spawn 4 Entangle entities per grid cell (4 block corners)
+                java.util.List<com.hypixel.hytale.component.Ref<com.hypixel.hytale.server.core.universe.world.storage.EntityStore>> entangleRefs =
+                        SpellVisualEffect.spawnEntangle(world, finalCells, npcYFinal);
+                // Register difficult terrain cells
+                for (SpellPatternCalculator.GridCell c : finalCells) {
+                    TerrainManager.addDifficultCell(c.x, c.z);
+                }
+                // Auto-despawn after 30 s if not in combat, or persist in combat.
+                // Also remove difficult terrain cells when entities despawn.
+                if (!combatSettings.isCombatActive()) {
+                    final java.util.Set<SpellPatternCalculator.GridCell> entangleCells =
+                            new java.util.HashSet<>(finalCells);
+                    PROJ_SCHEDULER.schedule(() -> world.execute(() -> {
+                        for (com.hypixel.hytale.component.Ref<com.hypixel.hytale.server.core.universe.world.storage.EntityStore> r : entangleRefs) {
+                            SpellVisualEffect.despawn(world, r);
+                        }
+                        for (SpellPatternCalculator.GridCell c : entangleCells) {
+                            TerrainManager.removeDifficultCell(c.x, c.z);
+                        }
+                    }), 30000L, java.util.concurrent.TimeUnit.MILLISECONDS);
+                }
+                break;
+            }
+            case "moonbeam": {
+                SpellCastingState.GridCell tc = castState.getConfirmedTargets().isEmpty()
+                        ? new SpellCastingState.GridCell(aimGridX, aimGridZ)
+                        : castState.getConfirmedTargets().get(0);
+                final int mx = tc.x, mz = tc.z;
+                Float groundY = SpellVisualManager.scanForGround(
+                        world, mx, mz, npcYFinal + 30f, 45);
+                float wy = groundY != null ? groundY : npcYFinal;
+                world.execute(() -> SpellVisualEffect.spawnStationary(
+                        "Moon_Beam", 1.0f, world,
+                        (mx * 2.0) + 1.0, wy, (mz * 2.0) + 1.0, 0f));
+                break;
+            }
+            case "sunbeam": {
+                float sunYaw = directionToYaw(castState.getDirection());
+                float ox = (castState.getCasterGridX() * 2.0f) + 1.0f;
+                float oz = (castState.getCasterGridZ() * 2.0f) + 1.0f;
+                Float groundY = SpellVisualManager.scanForGround(
+                        world, castState.getCasterGridX(), castState.getCasterGridZ(),
+                        npcYFinal + 30f, 45);
+                float wy = (groundY != null ? groundY : npcYFinal) + 1.0f;
+                final float fYaw = sunYaw, fOx = ox, fWy = wy, fOz = oz;
+                world.execute(() -> SpellVisualEffect.spawnStationary(
+                        "Sun_Beam", 1.0f, world, fOx, fWy, fOz, fYaw));
+                break;
+            }
+            case "thunderwave": {
+                System.out.println("[Griddify] [CAST] thunderwave cells=" + finalCells.size()
+                        + " caster=(" + castState.getCasterGridX() + "," + castState.getCasterGridZ()
+                        + ") aim=(" + aimGridX + "," + aimGridZ + ")");
+                float twYaw = directionToYaw(castState.getDirection());
+                world.execute(() -> SpellVisualEffect.spawnWave(
+                        "Thunderwave", 1.0f, world,
+                        castState.getCasterGridX(), castState.getCasterGridZ(),
+                        npcYFinal, finalCells, allPlayers, twYaw));
+                break;
+            }
+            case "ice_storm": {
+                world.execute(() -> SpellVisualEffect.spawnIceStorm(
+                        world, finalCells, npcYFinal, allPlayers));
+                break;
+            }
+            case "bardic_inspiration":
+            case "vicious_mockery":
+            case "bless":
+            case "hex":
+            case "hunters_mark":
+            case "power_word_stun": {
+                // Buff: spawn Mark under the target cell
+                SpellCastingState.GridCell bt = castState.getConfirmedTargets().isEmpty()
+                        ? new SpellCastingState.GridCell(aimGridX, aimGridZ)
+                        : castState.getConfirmedTargets().get(0);
+                world.execute(() -> SpellVisualEffect.spawnMark(world, bt.x, bt.z, npcYFinal, 4000L));
+                break;
+            }
+            case "wind_dash":
+            case "shadow_dash":
+            case "shadow_step": {
+                // Teleport: Mark at destination then Mark at origin briefly
+                float casterWx = (castState.getCasterGridX() * 2.0f) + 1.0f;
+                float casterWz = (castState.getCasterGridZ() * 2.0f) + 1.0f;
+                Float casterGY = SpellVisualManager.scanForGround(world,
+                        castState.getCasterGridX(), castState.getCasterGridZ(), npcYFinal + 30f, 45);
+                float casterWy = (casterGY != null ? casterGY : npcYFinal) + 0.05f;
+                world.execute(() -> {
+                    SpellVisualEffect.spawnWithTimeout("Mark", 1.0f, world,
+                            casterWx, casterWy, casterWz, 0f, 600L); // origin flash
+                    SpellCastingState.GridCell dt = castState.getConfirmedTargets().isEmpty()
+                            ? new SpellCastingState.GridCell(aimGridX, aimGridZ)
+                            : castState.getConfirmedTargets().get(0);
+                    SpellVisualEffect.spawnMark(world, dt.x, dt.z, npcYFinal, 2500L);
+                });
+                break;
+            }
+            case "call_lightning": {
+                // Repeated lightning strikes at target area over 3 seconds
+                SpellCastingState.GridCell tc = castState.getConfirmedTargets().isEmpty()
+                        ? new SpellCastingState.GridCell(aimGridX, aimGridZ)
+                        : castState.getConfirmedTargets().get(0);
+                final int cx = tc.x, cz = tc.z;
+                for (int strike = 0; strike < 4; strike++) {
+                    final long delay = strike * 750L;
+                    PROJ_SCHEDULER.schedule(() -> world.execute(() -> {
+                        float wx = (cx * 2.0f) + 1.0f;
+                        float wz = (cz * 2.0f) + 1.0f;
+                        Float gy = SpellVisualManager.scanForGround(world, cx, cz, npcYFinal + 30f, 45);
+                        float wy = (gy != null ? gy : npcYFinal) + 0.5f;
+                        SpellVisualEffect.spawnWithTimeout("Lightning_Bolt", 1.0f, world, wx, wy + 8f, wz, 0f, 50L);
+                        SpellVisualEffect.spawnWithTimeout("Explosion", 1.0f, world, wx, wy, wz, 0f, 400L);
+                    }), delay, java.util.concurrent.TimeUnit.MILLISECONDS);
+                }
+                break;
+            }
+            case "spirit_guardians": {
+                float ox2 = (castState.getCasterGridX() * 2.0f) + 1.0f;
+                float oz2 = (castState.getCasterGridZ() * 2.0f) + 1.0f;
+                Float gy2 = SpellVisualManager.scanForGround(world, castState.getCasterGridX(), castState.getCasterGridZ(), npcYFinal + 30f, 45);
+                float wy2 = (gy2 != null ? gy2 : npcYFinal) + 1.0f;
+                final float fOx2 = ox2, fWy2 = wy2, fOz2 = oz2;
+                world.execute(() -> SpellVisualEffect.spawnWithTimeout("Arcane_Bolt", 2.5f, world, fOx2, fWy2, fOz2, 0f, 2500L));
+                break;
+            }
+
+            // ── Self-buffs: Mark on caster ─────────────────────────────────
+            case "rage":
+            case "reckless_attack":
+            case "shield":
+            case "iron_body":
+            case "evasive_roll":
+            case "arcane_ward":
+            case "spell_resistance":
+            case "portent":
+            case "greater_portent":
+            case "third_eye":
+            case "expert_divination":
+            case "overchannel":
+            case "potent_cantrip":
+            case "sculpt_spells":
+            case "empowered_evocation":
+            case "blessed_healer":
+            case "disciple_of_life":
+            case "supreme_healing":
+            case "preserve_life": {
+                // Buff flash: Mark under caster
+                world.execute(() -> SpellVisualEffect.spawnMark(world,
+                        castState.getCasterGridX(), castState.getCasterGridZ(), npcYFinal, 2500L));
+                break;
+            }
+
+            // ── Frost aura: Frost_Bolt ring ────────────────────────────────
+            case "frost_shell": {
+                int fsCasterX = castState.getCasterGridX(), fsCasterZ = castState.getCasterGridZ();
+                for (SpellPatternCalculator.GridCell c : finalCells) {
+                    if (c.x == fsCasterX && c.z == fsCasterZ) continue; // skip caster cell
+                    float wx = (c.x * 2.0f) + 1.0f;
+                    float wz = (c.z * 2.0f) + 1.0f;
+                    Float groundY = SpellVisualManager.scanForGround(world, c.x, c.z, npcYFinal + 30f, 45);
+                    float wy = (groundY != null ? groundY : npcYFinal) + 0.5f;
+                    world.execute(() -> SpellVisualEffect.spawnWithTimeout("Frost_Bolt", 0.8f, world, wx, wy, wz, 0f, 2000L));
+                }
+                break;
+            }
+
+            // ── Healing auras: Heal_Circle under caster ────────────────────
+            case "healing_song": {
+                // 33% smaller than other healing auras
+                float hsWx = (castState.getCasterGridX() * 2.0f) + 1.0f;
+                float hsWz = (castState.getCasterGridZ() * 2.0f) + 1.0f;
+                Float hsGY = SpellVisualManager.scanForGround(world, castState.getCasterGridX(), castState.getCasterGridZ(), npcYFinal + 30f, 45);
+                float hsWy = (hsGY != null ? hsGY : npcYFinal) + 0.1f;
+                final float fHsWx = hsWx, fHsWy = hsWy, fHsWz = hsWz;
+                world.execute(() -> SpellVisualEffect.spawnWithTimeout("Heal_Circle", 0.6f, world, fHsWx, fHsWy, fHsWz, 0f, 3000L));
+                break;
+            }
+            case "aura_of_protection":
+            case "hurricane_strike": {
+                float casterWx = (castState.getCasterGridX() * 2.0f) + 1.0f;
+                float casterWz = (castState.getCasterGridZ() * 2.0f) + 1.0f;
+                Float cGY = SpellVisualManager.scanForGround(world, castState.getCasterGridX(), castState.getCasterGridZ(), npcYFinal + 30f, 45);
+                float cWy = (cGY != null ? cGY : npcYFinal) + 0.1f;
+                final float fCWx = casterWx, fCWy = cWy, fCWz = casterWz;
+                world.execute(() -> SpellVisualEffect.spawnWithTimeout("Heal_Circle", 2.0f, world, fCWx, fCWy, fCWz, 0f, 3000L));
+                break;
+            }
+
+            // ── Hypnotic Pattern: Arcane_Bolt pillars in area ─────────────
+            case "hypnotic_pattern": {
+                for (SpellPatternCalculator.GridCell c : finalCells) {
+                    float wx = (c.x * 2.0f) + 1.0f;
+                    float wz = (c.z * 2.0f) + 1.0f;
+                    Float groundY = SpellVisualManager.scanForGround(world, c.x, c.z, npcYFinal + 30f, 45);
+                    float wy = (groundY != null ? groundY : npcYFinal) + 0.5f;
+                    world.execute(() -> SpellVisualEffect.spawnWithTimeout("Arcane_Bolt", 0.9f, world, wx, wy, wz, 0f, 3000L));
+                }
+                break;
+            }
+
+            // ── Wild Shape: Mark at caster feet (transform flash) ──────────
+            // (actual model swap handled by WildShapeManager above; this just
+            //  adds a ground Mark as visual feedback that the transform happened)
+        } // end switch spellKey
     }
 
     // ── Projectile scheduler ──────────────────────────────────────────────────
@@ -986,14 +1058,50 @@ public class CastFinalCommand extends AbstractPlayerCommand {
      * itemAnimationsId = weapon's PlayerAnimationsId field ("Longsword" etc.).
      * AnimationSlot.Action bypasses model-animation validation so any string is accepted.
      */
-    private static String[] getNpcAnimationForSpell(String spellKey) {
+    /**
+     * Returns {animationId, itemAnimationsId} for the NPC's attack animation,
+     * or null if no animation should play (purely projectile spells with no weapon override).
+     *
+     * itemAnimationsId meanings:
+     *   "Longsword"  — weapon overlay animation set (sword swings)
+     *   "Default"    — unarmed/default weapon overlay
+     *   null         — base character animation (bow, staff, spellbook charging)
+     */
+    private static String[] getNpcAnimationForSpell(String spellKey, String rightHandId) {
+        String id = rightHandId != null ? rightHandId.toLowerCase() : "";
         switch (spellKey) {
-            case "sword_swing":      return new String[]{"SwingRight",  "Longsword"};
-            case "paladin_strike":   return new String[]{"SwingUpLeft", "Longsword"};
-            case "sneak_stab":       return new String[]{"SwingLeft",   "Longsword"};
-            case "pact_blade":       return new String[]{"SwingUpLeft", "Longsword"};
-            default:                  return null;
+            // ── Longsword / melee weapons ──────────────────────────────────
+            case "sword_swing":         return new String[]{"SwingRight",  "Longsword"};
+            case "paladin_strike":      return new String[]{"SwingUpLeft", "Longsword"};
+            case "sneak_stab":          return new String[]{"SwingLeft",   "Longsword"};
+            case "pact_blade":          return new String[]{"SwingUpLeft", "Longsword"};
+            case "greataxe_swing":      return new String[]{"SwingRight",  "Longsword"};
+            case "shortsword_slash":    return new String[]{"SwingLeft",   "Longsword"};
+            case "morningstar_strike":  return new String[]{"SwingRight",  "Longsword"};
+            // ── Staff / quarterstaff ────────────────────────────────────────
+            case "staff_strike":        return new String[]{"SwingLeft",   "Default"};
+            case "quarterstaff":        return new String[]{"SwingLeft",   "Default"};
+            // ── Unarmed ─────────────────────────────────────────────────────
+            case "unarmed_strike":      return new String[]{"SwingLeft",   "Default"};
+            // ── Dagger throw (use swing since no throw anim exists) ─────────
+            case "dagger_throw":        return new String[]{"SwingRight",  "Default"};
+            // ── Bow ─────────────────────────────────────────────────────────
+            case "bow_shot":            return new String[]{"ShootCharging", null};  // base char anim
+            // ── Default: detect weapon from equipped item ────────────────────
+            default:
+                if (id.startsWith("weapon_staff")) {
+                    return new String[]{"CastSummonCharging", null};   // base char anim
+                }
+                if (id.startsWith("weapon_spellbook")) {
+                    return new String[]{"CastHurlCharging", null};     // base char anim
+                }
+                return null;
         }
+    }
+
+    /** Backward-compat overload for call sites that don't have rightHandId. */
+    private static String[] getNpcAnimationForSpell(String spellKey) {
+        return getNpcAnimationForSpell(spellKey, null);
     }
 
     /** Convert Direction8 to yaw radians for entity orientation.

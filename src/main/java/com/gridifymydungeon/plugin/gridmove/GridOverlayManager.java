@@ -1,15 +1,16 @@
 package com.gridifymydungeon.plugin.gridmove;
 
+import com.hypixel.hytale.component.AddReason;
 import com.hypixel.hytale.component.Holder;
 import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.component.RemoveReason;
 import com.hypixel.hytale.component.Store;
-import com.gridifymydungeon.plugin.gridmove.TerrainManager;
 import com.hypixel.hytale.math.util.ChunkUtil;
 import com.hypixel.hytale.math.vector.Vector3d;
 import com.hypixel.hytale.math.vector.Vector3f;
 import com.hypixel.hytale.math.vector.Vector3i;
 import com.hypixel.hytale.protocol.BlockMaterial;
+import com.hypixel.hytale.protocol.packets.entities.EntityUpdates;
 import com.hypixel.hytale.server.core.asset.type.blocktype.config.BlockType;
 import com.hypixel.hytale.server.core.asset.type.model.config.Model;
 import com.hypixel.hytale.server.core.asset.type.model.config.ModelAsset;
@@ -18,6 +19,7 @@ import com.hypixel.hytale.server.core.modules.entity.component.BoundingBox;
 import com.hypixel.hytale.server.core.modules.entity.component.ModelComponent;
 import com.hypixel.hytale.server.core.modules.entity.component.TransformComponent;
 import com.hypixel.hytale.server.core.modules.entity.tracker.NetworkId;
+import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.world.World;
 import com.hypixel.hytale.server.core.universe.world.chunk.ChunkColumn;
 import com.hypixel.hytale.server.core.universe.world.chunk.section.ChunkSection;
@@ -32,23 +34,32 @@ import java.util.List;
 import java.util.Map;
 import java.util.Queue;
 import java.util.UUID;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 /**
- * GridOverlayManager — spawns movement-range grid overlays.
+ * GridOverlayManager — persistent-tile teleport system (no flicker).
  *
- * One entity per 2x2 grid cell, centred at the cell's world-space midpoint.
- * Models (full 2x2 tile textures, no rotation needed):
- *   Grid_Basic   — grey, used for monster/GM range
- *   Grid_Player  — blue, used for player movement range
+ * Tiles are spawned ONCE per player session (/gridon).
+ * On every movement refresh, tiles are TELEPORTED to new BFS positions instead of
+ * being despawned and respawned. This eliminates the entity-tracker spawn/remove
+ * cycle that caused flickering for other players.
  *
- * GM /gridon with no monster → flat 100x100 area map around GM position.
- * Barrier blocks (id contains "barrier") and fluid cells are always skipped.
+ * Slots with no BFS cell are "parked" 30 blocks underground (invisible).
+ * Private visibility is applied once at spawn via EntityUpdates(removed) sent to
+ * all non-owners 80ms after initial spawn.
+ *
+ * Models (full 2x2 tile textures):
+ *   Grid_Player  — blue, BFS movement range
+ *   Grid_Basic   — grey, GM static map / monster range
+ *   Grid_Difficult — difficult terrain overlay
  */
 public class GridOverlayManager {
 
-    private static final String MODEL_PLAYER    = "Grid_Player"; // blue
-    private static final String MODEL_DEFAULT   = "Grid_Basic";  // grey
-    private static final String MODEL_DIFFICULT = "Grid_Difficult"; // difficult terrain overlay
+    private static final String MODEL_PLAYER    = "Grid_Player";
+    private static final String MODEL_DEFAULT   = "Grid_Basic";
+    private static final String MODEL_DIFFICULT = "Grid_Difficult";
     private static final String FALLBACK_MODEL  = "Debug";
 
     private static Model cachedPlayerModel    = null;
@@ -56,89 +67,123 @@ public class GridOverlayManager {
     private static Model cachedDifficultModel = null;
     private static boolean modelsAttempted    = false;
 
-    private static final int MAX_OVERLAY_CELLS = 150;
-    private static final int GM_MAP_RADIUS     = 15;   // 30x30 (/grid command)
+    private static final int   MAX_OVERLAY_CELLS = 150;
+    private static final int   GM_MAP_RADIUS     = 15;
+    private static final float MAX_HEIGHT_UP     = 3.0f;
+    private static final float MAX_HEIGHT_DOWN   = 4.0f;
 
-    private static final float MAX_HEIGHT_UP   = 3.0f;
-    private static final float MAX_HEIGHT_DOWN = 4.0f;
+    /** Y offset below NPC for parked (invisible) tiles. */
+    private static final float PARK_DEPTH = 30.0f;
+    /** Y offset above ground for visible tiles. */
+    private static final float TILE_Y_OFFSET = 0.02f;
+    /** Minimum Y delta (relative to npcY) to show tile: 15 blocks below NPC = -15.0f. */
+    private static final float MIN_SHOW_Y_RANGE = -15.0f;
+    /** Maximum Y delta (relative to npcY) to show tile: 3 blocks above NPC = +3.0f. */
+    private static final float MAX_SHOW_Y_RANGE = 3.0f;
+
+    /** Shared scheduler for post-spawn hide (80ms delay, 1 daemon thread). */
+    private static final ScheduledExecutorService HIDE_SCHED =
+            Executors.newSingleThreadScheduledExecutor(r -> {
+                Thread t = new Thread(r, "grid-hide-scheduler");
+                t.setDaemon(true);
+                return t;
+            });
+    private static final long HIDE_DELAY_MS = 80L;
 
     private static final int[][] NEIGHBORS = {
-            { 0, -1}, { 1, 0}, { 0, 1}, {-1, 0},      // cardinal
-            { 1, -1}, { 1, 1}, {-1, 1}, {-1, -1},      // diagonal
+            { 0,-1}, { 1, 0}, { 0, 1}, {-1, 0},
+            { 1,-1}, { 1, 1}, {-1, 1}, {-1,-1},
     };
 
     // ========================================================
     // PUBLIC API
     // ========================================================
 
-    /**
-     * Player /gridon — blue tiles, BFS movement range.
-     * gmMapOverlayActive = false  →  refreshGridOverlay runs BFS (not static map).
-     */
+    /** Player /gridon — blue tiles, BFS movement range. Tiles are private to owner. */
+    public static boolean spawnPlayerGridOverlay(World world, GridPlayerState state,
+                                                 CollisionDetector collisionDetector,
+                                                 UUID excludePlayer, PlayerRef ownerRef) {
+        ensureModels();
+        Model model = cachedPlayerModel != null ? cachedPlayerModel : cachedDefaultModel;
+        if (model == null) return false;
+
+        if (state.gridOverlay.isEmpty()) {
+            // First time: allocate the persistent tile pool
+            allocateTilePool(world, state, model, ownerRef);
+        }
+
+        List<ReachableCell> cells = floodFillReachable(world, state, collisionDetector, excludePlayer);
+        teleportTilesToCells(world, state, cells, model);
+        state.gridOverlayEnabled = true;
+        state.gmMapOverlayActive = false;
+        System.out.println("[GridMove] [GRID] Player overlay: " + cells.size() + " cells (teleport)");
+        return true;
+    }
+
     public static boolean spawnPlayerGridOverlay(World world, GridPlayerState state,
                                                  CollisionDetector collisionDetector, UUID excludePlayer) {
+        return spawnPlayerGridOverlay(world, state, collisionDetector, excludePlayer, null);
+    }
+
+    /** GM /gridon with monster — blue tiles, BFS. Hidden from non-ownerRef players. */
+    public static boolean spawnGMBFSOverlay(World world, GridPlayerState state,
+                                            CollisionDetector collisionDetector, PlayerRef ownerRef) {
         ensureModels();
         Model model = cachedPlayerModel != null ? cachedPlayerModel : cachedDefaultModel;
         if (model == null) return false;
-        removeGridOverlayEntities(world, state);   // clear any previous overlay first
-        List<ReachableCell> cells = floodFillReachable(world, state, collisionDetector, excludePlayer);
-        spawnCells(world, state, cells, model, 0.02f); // Grid_Player: +0.02 Y offset
+
+        if (state.gridOverlay.isEmpty()) {
+            allocateTilePool(world, state, model, ownerRef);
+        }
+
+        List<ReachableCell> cells = floodFillReachable(world, state, collisionDetector, null);
+        teleportTilesToCells(world, state, cells, model);
         state.gridOverlayEnabled = true;
-        state.gmMapOverlayActive = false;  // BFS mode — not static map
-        System.out.println("[GridMove] [GRID] Player overlay: " + cells.size() + " cells");
+        state.gmMapOverlayActive = false;
+        System.out.println("[GridMove] [GRID] GM BFS overlay: " + cells.size() + " cells (teleport)");
         return true;
     }
 
-    /**
-     * GM /gridon with monster — blue tiles (Grid_Player), BFS movement range.
-     * Same texture as player overlay so it's visually consistent.
-     * gmMapOverlayActive = false  →  refreshGridOverlay runs BFS (not static map).
-     */
     public static boolean spawnGMBFSOverlay(World world, GridPlayerState state,
                                             CollisionDetector collisionDetector) {
-        ensureModels();
-        Model model = cachedPlayerModel != null ? cachedPlayerModel : cachedDefaultModel;
-        if (model == null) return false;
-        removeGridOverlayEntities(world, state);   // clear any previous overlay first
-        List<ReachableCell> cells = floodFillReachable(world, state, collisionDetector, null);
-        spawnCells(world, state, cells, model, 0.02f);
-        state.gridOverlayEnabled = true;
-        state.gmMapOverlayActive = false;  // BFS mode — not static map
-        System.out.println("[GridMove] [GRID] GM BFS overlay (blue): " + cells.size() + " cells");
-        return true;
+        return spawnGMBFSOverlay(world, state, collisionDetector, null);
     }
 
-    /** Monster /gridon (GM controlling) — grey tiles, BFS movement range. (kept for internal refresh) */
+    /** Monster /gridon (GM controlling) — grey tiles, BFS movement range. */
     public static boolean spawnGridOverlay(World world, GridPlayerState state,
                                            CollisionDetector collisionDetector, UUID excludePlayer) {
         ensureModels();
         Model model = cachedDefaultModel;
         if (model == null) return false;
-        removeGridOverlayEntities(world, state);
+
+        if (state.gridOverlay.isEmpty()) {
+            allocateTilePool(world, state, model, null);
+        }
+
         List<ReachableCell> cells = floodFillReachable(world, state, collisionDetector, excludePlayer);
-        spawnCells(world, state, cells, model);
+        teleportTilesToCells(world, state, cells, model);
         state.gridOverlayEnabled = true;
         state.gmMapOverlayActive = false;
-        System.out.println("[GridMove] [GRID] Monster overlay: " + cells.size() + " cells");
+        System.out.println("[GridMove] [GRID] Monster overlay: " + cells.size() + " cells (teleport)");
         return true;
     }
 
     /**
-     * GM /grid toggle — flat 30×30 area map, skipping barriers and fluid.
-     * STATIC: does not move when the GM/monster moves. Type /grid twice to reposition.
-     * gmMapOverlayActive = TRUE  →  this overlay is the static /grid map, not a BFS range.
+     * GM /grid toggle — flat 30x30 area map, static.
+     * Uses legacy spawn/remove (not persistent pool) since it only runs once.
      */
     public static boolean spawnGMMapOverlay(World world, GridPlayerState gmState) {
         ensureModels();
         Model model = cachedDefaultModel;
         if (model == null) return false;
 
-        removeGridOverlayEntities(world, gmState);  // clear any previous overlay first
+        removeGridOverlayEntities(world, gmState);
 
         int centerX = gmState.currentGridX;
         int centerZ = gmState.currentGridZ;
-        float scanStart = gmState.npcY + 2.0f;  // scan downward from above NPC to find ground AT NPC level
+        float scanStart = gmState.npcY + 2.0f;
 
+        Store<EntityStore> store = world.getEntityStore().getStore();
         List<ReachableCell> cells = new ArrayList<>();
         for (int dx = -GM_MAP_RADIUS; dx <= GM_MAP_RADIUS; dx++) {
             for (int dz = -GM_MAP_RADIUS; dz <= GM_MAP_RADIUS; dz++) {
@@ -151,34 +196,45 @@ public class GridOverlayManager {
                 cells.add(new ReachableCell(gx, gz, groundY));
             }
         }
-        spawnCells(world, gmState, cells, model);
+        for (ReachableCell cell : cells) {
+            float cx = (cell.gridX * 2.0f) + 1.0f;
+            float cz = (cell.gridZ * 2.0f) + 1.0f;
+            Ref<EntityStore> ref = spawnTile(store, model, cx, cell.groundY + TILE_Y_OFFSET, cz);
+            gmState.gridOverlay.add(ref);
+        }
         gmState.gridOverlayEnabled = true;
-        gmState.gmMapOverlayActive = true;  // Mark as static /grid map — refreshGridOverlay stays out
+        gmState.gmMapOverlayActive = true;
         System.out.println("[GridMove] [GRID] GM map overlay: " + cells.size() + " cells (30x30)");
         return true;
     }
 
-    /** GM /grid toggle — same as spawnGMMapOverlay, kept for GridToggleCommand compatibility. */
     public static boolean spawnGMSmallMapOverlay(World world, GridPlayerState gmState) {
         return spawnGMMapOverlay(world, gmState);
     }
 
+    /**
+     * Refresh: re-run BFS and teleport existing tiles to new positions.
+     * If the tile pool doesn't exist yet, falls through to spawnPlayerGridOverlay.
+     */
     public static void refreshGridOverlay(World world, GridPlayerState state,
-                                          CollisionDetector collisionDetector, UUID excludePlayer) {
+                                          CollisionDetector collisionDetector, UUID excludePlayer,
+                                          PlayerRef ownerRef) {
         if (!state.gridOverlayEnabled) return;
-        // Static /grid map — do NOT auto-refresh on movement; user types /grid again to reposition
         if (state.gmMapOverlayActive) return;
 
-        removeGridOverlayEntities(world, state);
         if (excludePlayer != null) {
-            // Regular player BFS (blue)
-            spawnPlayerGridOverlay(world, state, collisionDetector, excludePlayer);
+            spawnPlayerGridOverlay(world, state, collisionDetector, excludePlayer, ownerRef);
         } else {
-            // GM BFS (blue, same texture as players)
-            spawnGMBFSOverlay(world, state, collisionDetector);
+            spawnGMBFSOverlay(world, state, collisionDetector, ownerRef);
         }
     }
 
+    public static void refreshGridOverlay(World world, GridPlayerState state,
+                                          CollisionDetector collisionDetector, UUID excludePlayer) {
+        refreshGridOverlay(world, state, collisionDetector, excludePlayer, null);
+    }
+
+    /** Remove all tile entities and reset overlay state. */
     public static void removeGridOverlay(World world, GridPlayerState state) {
         removeGridOverlayEntities(world, state);
         state.gridOverlayEnabled = false;
@@ -187,32 +243,106 @@ public class GridOverlayManager {
     }
 
     // ========================================================
-    // CELL SPAWNING — 1 entity per cell, centred in the 2x2 block
+    // PERSISTENT TILE POOL
     // ========================================================
 
-    private static void spawnCells(World world, GridPlayerState state,
-                                   List<ReachableCell> cells, Model model) {
-        spawnCells(world, state, cells, model, 0.01f);
-    }
-
-    private static void spawnCells(World world, GridPlayerState state,
-                                   List<ReachableCell> cells, Model model, float yOffset) {
+    /**
+     * Allocate MAX_OVERLAY_CELLS tile entities at the NPC's parked position
+     * (30 blocks underground). This is called ONCE per session.
+     * After 80ms, all tiles are hidden from non-owner players.
+     */
+    private static void allocateTilePool(World world, GridPlayerState state,
+                                         Model model, PlayerRef ownerRef) {
         Store<EntityStore> store = world.getEntityStore().getStore();
-        for (ReachableCell cell : cells) {
-            // Choose difficult overlay if terrain warrants it
-            Model cellModel = model;
-            if (cachedDifficultModel != null && cachedDifficultModel != model
-                    && TerrainManager.shouldShowDifficultOverlay(cell.gridX, cell.gridZ, cell.groundY, world)) {
-                cellModel = cachedDifficultModel;
-            }
-            // Centre of the 2x2 block: gridX*2 + 1, gridZ*2 + 1
-            float cx = (cell.gridX * 2.0f) + 1.0f;
-            float cz = (cell.gridZ * 2.0f) + 1.0f;
-            float y  = cell.groundY + yOffset;
-            Ref<EntityStore> ref = spawnTile(store, cellModel, cx, y, cz);
+        float parkX = (state.currentGridX * 2.0f) + 1.0f;
+        float parkY = state.npcY - PARK_DEPTH;
+        float parkZ = (state.currentGridZ * 2.0f) + 1.0f;
+
+        int[] netIds = new int[MAX_OVERLAY_CELLS];
+
+        for (int i = 0; i < MAX_OVERLAY_CELLS; i++) {
+            int[] netIdOut = {-1};
+            Ref<EntityStore> ref = spawnTile(store, model, parkX, parkY, parkZ, netIdOut);
             state.gridOverlay.add(ref);
+            netIds[i] = netIdOut[0];
+        }
+        System.out.println("[GridMove] [GRID] Allocated " + MAX_OVERLAY_CELLS + " persistent tiles");
+
+        // Hide from non-owners after entity-tracker has broadcast the spawn
+        if (ownerRef != null) {
+            final PlayerRef owner = ownerRef;
+            final int[] ids = netIds;
+            HIDE_SCHED.schedule(() -> world.execute(() -> {
+                EntityUpdates removePacket = new EntityUpdates(ids, null);
+                for (PlayerRef p : world.getPlayerRefs()) {
+                    if (!p.getUuid().equals(owner.getUuid())) {
+                        p.getPacketHandler().writeNoCache(removePacket);
+                    }
+                }
+                System.out.println("[GridMove] [GRID] Hidden " + ids.length + " tiles from non-owners");
+            }), HIDE_DELAY_MS, TimeUnit.MILLISECONDS);
         }
     }
+
+    /**
+     * Teleport existing tile pool entities to match the new BFS cell list.
+     * Tiles with a BFS cell → moved to that cell's world position.
+     * Tiles with no cell    → parked 30 blocks below NPC (invisible).
+     *
+     * Also updates model if a cell needs the difficult-terrain overlay.
+     */
+    private static void teleportTilesToCells(World world, GridPlayerState state,
+                                             List<ReachableCell> cells, Model baseModel) {
+        Store<EntityStore> store = world.getEntityStore().getStore();
+        float parkX = (state.currentGridX * 2.0f) + 1.0f;
+        float parkY = state.npcY - PARK_DEPTH;
+        float parkZ = (state.currentGridZ * 2.0f) + 1.0f;
+
+        int poolSize = state.gridOverlay.size();
+        int cellCount = Math.min(cells.size(), poolSize);
+
+        for (int i = 0; i < poolSize; i++) {
+            Ref<EntityStore> ref = state.gridOverlay.get(i);
+            if (ref == null || !ref.isValid()) continue;
+
+            TransformComponent tc = store.getComponent(ref, TransformComponent.getComponentType());
+            if (tc == null) continue;
+
+            if (i < cellCount) {
+                ReachableCell cell = cells.get(i);
+                float tileY = cell.groundY + TILE_Y_OFFSET;
+
+                // Height-range filter: hide tiles that are out of the [-3, +15] range
+                float deltaY = tileY - state.npcY;
+                if (deltaY < MIN_SHOW_Y_RANGE || deltaY > MAX_SHOW_Y_RANGE) {
+                    tc.setPosition(new Vector3d(parkX, parkY, parkZ));
+                    continue;
+                }
+
+                float cx = (cell.gridX * 2.0f) + 1.0f;
+                float cz = (cell.gridZ * 2.0f) + 1.0f;
+                tc.setPosition(new Vector3d(cx, tileY, cz));
+
+                // Update model component if difficult terrain
+                if (cachedDifficultModel != null && cachedDifficultModel != baseModel
+                        && TerrainManager.shouldShowDifficultOverlay(cell.gridX, cell.gridZ, cell.groundY, world)) {
+                    store.putComponent(ref, ModelComponent.getComponentType(), new ModelComponent(cachedDifficultModel));
+                } else {
+                    ModelComponent mc = store.getComponent(ref, ModelComponent.getComponentType());
+                    if (mc != null && mc.getModel() != baseModel) {
+                        store.putComponent(ref, ModelComponent.getComponentType(), new ModelComponent(baseModel));
+                    }
+                }
+            } else {
+                // Park this slot underground
+                tc.setPosition(new Vector3d(parkX, parkY, parkZ));
+            }
+        }
+    }
+
+    // ========================================================
+    // LEGACY REMOVE (used by GM map and removeGridOverlay)
+    // ========================================================
 
     private static void removeGridOverlayEntities(World world, GridPlayerState state) {
         Store<EntityStore> store = world.getEntityStore().getStore();
@@ -284,7 +414,7 @@ public class GridOverlayManager {
     }
 
     // ========================================================
-    // BARRIER DETECTION
+    // BARRIER / GROUND / FLUID
     // ========================================================
 
     private static boolean isBarrierCell(World world, int gridX, int gridZ, float refY) {
@@ -303,10 +433,6 @@ public class GridOverlayManager {
         } catch (Exception ignored) {}
         return false;
     }
-
-    // ========================================================
-    // GROUND SCANNING
-    // ========================================================
 
     private static Float scanForGround(World world, int gridX, int gridZ, float referenceY) {
         return scanForGround(world, gridX, gridZ, referenceY, 12);
@@ -337,10 +463,6 @@ public class GridOverlayManager {
         }
         return null;
     }
-
-    // ========================================================
-    // FLUID DETECTION
-    // ========================================================
 
     private static boolean hasFluidAbove(World world, int gridX, int gridZ, float groundY) {
         try {
@@ -424,20 +546,26 @@ public class GridOverlayManager {
     }
 
     // ========================================================
-    // ENTITY SPAWNING — single tile per cell, no rotation
+    // ENTITY SPAWNING
     // ========================================================
 
     private static Ref<EntityStore> spawnTile(Store<EntityStore> store, Model model,
                                               float x, float y, float z) {
+        return spawnTile(store, model, x, y, z, null);
+    }
+
+    private static Ref<EntityStore> spawnTile(Store<EntityStore> store, Model model,
+                                              float x, float y, float z, int[] netIdOut) {
         Holder<EntityStore> holder = EntityStore.REGISTRY.newHolder();
         holder.addComponent(TransformComponent.getComponentType(),
                 new TransformComponent(new Vector3d(x, y, z), new Vector3f(0, 0, 0)));
         holder.addComponent(ModelComponent.getComponentType(), new ModelComponent(model));
         holder.addComponent(BoundingBox.getComponentType(), new BoundingBox(model.getBoundingBox()));
-        holder.addComponent(NetworkId.getComponentType(),
-                new NetworkId(store.getExternalData().takeNextNetworkId()));
+        int netId = store.getExternalData().takeNextNetworkId();
+        if (netIdOut != null && netIdOut.length > 0) netIdOut[0] = netId;
+        holder.addComponent(NetworkId.getComponentType(), new NetworkId(netId));
         holder.ensureComponent(UUIDComponent.getComponentType());
-        return store.addEntity(holder, com.hypixel.hytale.component.AddReason.SPAWN);
+        return store.addEntity(holder, AddReason.SPAWN);
     }
 
     private static long packKey(int gridX, int gridZ) {
@@ -453,7 +581,7 @@ public class GridOverlayManager {
         BfsNode(int x, int z, double m, float y) { gridX=x; gridZ=z; movesLeft=m; groundY=y; }
     }
 
-    private static class ReachableCell {
+    static class ReachableCell {
         final int gridX, gridZ; final float groundY;
         ReachableCell(int x, int z, float y) { gridX=x; gridZ=z; groundY=y; }
     }

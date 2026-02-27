@@ -73,10 +73,11 @@ public class ListSpellsCommand extends AbstractPlayerCommand {
         playerRef.sendMessage(Message.raw("  Spell Slots: " + state.stats.getRemainingSpellSlots() + "/" + state.stats.getSpellSlots()).color("#FFA500"));
         playerRef.sendMessage(Message.raw(""));
 
+        String equippedWeapon = state.storedRightHand; // may be null if /gridmove not yet used
         int base = 0, sub = 0;
         playerRef.sendMessage(Message.raw("  BASE CLASS SPELLS/ABILITIES:").color("#87CEEB"));
         for (SpellData spell : available) {
-            if (spell.isBaseClassSpell()) { printSpell(playerRef, spell); base++; }
+            if (spell.isBaseClassSpell()) { printSpell(playerRef, spell, equippedWeapon); base++; }
         }
         if (base == 0) playerRef.sendMessage(Message.raw("    (none available yet)").color("#808080"));
         playerRef.sendMessage(Message.raw(""));
@@ -150,10 +151,19 @@ public class ListSpellsCommand extends AbstractPlayerCommand {
         p.sendMessage(Message.raw("=========================================").color("#FFD700"));
     }
 
-    private void printSpell(PlayerRef p, SpellData spell) {
+    private void printSpell(PlayerRef p, SpellData spell) { printSpell(p, spell, null); }
+
+    /** Print a spell entry. Pass equippedWeapon (storedRightHand) to show weapon context on basic attacks. */
+    private void printSpell(PlayerRef p, SpellData spell, String equippedWeapon) {
         String cost = spell.getSlotCost() > 0 ? " (Lv." + spell.getSpellLevel() + " | " + spell.getSlotCost() + " slots)" : " (cantrip)";
         String range = " | range " + (spell.getRangeGrids() > 0 ? spell.getRangeGrids() + "g" : "touch");
-        p.sendMessage(Message.raw("    - " + spell.getName() + cost + range).color("#FFFFFF"));
+        // For basic attacks (no slot cost, range ≤ 1 or is bow), add weapon context
+        String weaponSuffix = "";
+        if (equippedWeapon != null && !equippedWeapon.isEmpty() && !equippedWeapon.equals("Empty")
+                && spell.getSlotCost() == 0) {
+            weaponSuffix = " [" + equippedWeapon + "]";
+        }
+        p.sendMessage(Message.raw("    - " + spell.getName() + cost + range + weaponSuffix).color("#FFFFFF"));
         if (spell.getDamageDice() != null) {
             p.sendMessage(Message.raw("      Dmg: " + spell.getDamageDice() + " " + spell.getDamageType().name().toLowerCase()
                     + " | " + spell.getPattern().name().toLowerCase()).color("#FF6B6B"));

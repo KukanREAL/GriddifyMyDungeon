@@ -1,5 +1,7 @@
-package com.gridifymydungeon.plugin.gridmove;
+package com.gridifymydungeon.plugin.gridmove.commands;
 
+import com.gridifymydungeon.plugin.gridmove.GridMoveManager;
+import com.gridifymydungeon.plugin.gridmove.GridPlayerState;
 import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.component.Store;
 import com.hypixel.hytale.protocol.ItemWithAllMetadata;

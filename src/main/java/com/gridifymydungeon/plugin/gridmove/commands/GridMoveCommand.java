@@ -16,6 +16,8 @@ import com.hypixel.hytale.server.core.Message;
 import com.hypixel.hytale.server.core.command.system.CommandContext;
 import com.hypixel.hytale.server.core.command.system.basecommands.AbstractPlayerCommand;
 import com.hypixel.hytale.server.core.inventory.ItemStack;
+import com.hypixel.hytale.server.core.entity.entities.Player;
+import com.hypixel.hytale.server.core.inventory.Inventory;
 import com.hypixel.hytale.server.core.modules.entity.component.TransformComponent;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.world.World;
@@ -163,6 +165,27 @@ public class GridMoveCommand extends AbstractPlayerCommand {
                     NotificationStyle.Default
             );
         }
+
+        // ── Crossbow check: not supported in grid combat — ask player to switch to shortbow ──
+        try {
+            Player playerComp = store.getComponent(ref, Player.getComponentType());
+            if (playerComp != null) {
+                Inventory inv = playerComp.getInventory();
+                ItemStack hotbarItem = inv.getItemInHand();
+                if (hotbarItem != null && !hotbarItem.isEmpty()) {
+                    String weapId = hotbarItem.getItemId();
+                    if (weapId != null && weapId.toLowerCase().startsWith("weapon_crossbow")) {
+                        Message crossbowPrimary   = Message.raw("Crossbow not supported in grid combat!").color("#FF4500");
+                        Message crossbowSecondary = Message.raw("Switch to a Shortbow (" + weapId + ") and try again.").color("#FF6B6B");
+                        ItemWithAllMetadata crossbowIcon = new ItemStack("Ingredient_Crystal_Red", 1).toPacket();
+                        NotificationUtil.sendNotification(playerRef.getPacketHandler(),
+                                crossbowPrimary, crossbowSecondary, crossbowIcon, NotificationStyle.Default);
+                        System.out.println("[GridMove] [WARN] " + playerRef.getUsername() + " tried /gridmove with crossbow: " + weapId);
+                        return;
+                    }
+                }
+            }
+        } catch (Exception ignored) {} // if inventory unavailable, just continue
 
         state.currentGridX = gridX;
         state.currentGridZ = gridZ;

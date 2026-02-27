@@ -262,8 +262,9 @@ public class PlayerEntityController {
             }
 
             // FIX 3: createScaledModel instead of non-existent createDefaultModel
+            // FOG_MODEL scale: 6.5f (13x13 tiles = 6.5x the base 2x2 tile)
             com.hypixel.hytale.server.core.asset.type.model.config.Model model =
-                    com.hypixel.hytale.server.core.asset.type.model.config.Model.createScaledModel(asset, 1.0f);
+                    com.hypixel.hytale.server.core.asset.type.model.config.Model.createScaledModel(asset, 6.5f);
 
             Store<com.hypixel.hytale.server.core.universe.world.storage.EntityStore> store =
                     world.getEntityStore().getStore();
@@ -323,6 +324,22 @@ public class PlayerEntityController {
                     true, store);
         } catch (Exception e) {
             System.err.println("[GridMove] [ERROR] Failed to play NPC animation: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Stop the Action-slot animation on the player's NPC entity.
+     * Sends PlayAnimation(null, null, Action) which tells the client to clear the animation.
+     */
+    public static void stopNpcAnimation(World world, GridPlayerState state) {
+        if (state.npcEntity == null || !state.npcEntity.isValid()) return;
+        try {
+            Store<com.hypixel.hytale.server.core.universe.world.storage.EntityStore> store =
+                    world.getEntityStore().getStore();
+            AnimationUtils.stopAnimation(state.npcEntity, AnimationSlot.Action, true, store);
+            System.out.println("[GridMove] [ANIM] stopNpcAnimation sent");
+        } catch (Exception e) {
+            System.err.println("[GridMove] [ERROR] Failed to stop NPC animation: " + e.getMessage());
         }
     }
 
@@ -502,6 +519,39 @@ public class PlayerEntityController {
         }
     }
 
+    /**
+     * Hide all entities in a player's grid overlay from every player EXCEPT the owner.
+     * Called 200 ms after spawning so entity-tracker has had time to broadcast them.
+     *
+     * @param world     the world
+     * @param state     GridPlayerState whose gridOverlay list to hide
+     * @param owner     the player that should KEEP seeing the tiles
+     */
+    public static void hideGridOverlayFromOthers(World world,
+                                                 com.gridifymydungeon.plugin.gridmove.GridPlayerState state,
+                                                 PlayerRef owner) {
+        Store<EntityStore> store = world.getEntityStore().getStore();
+        int hidden = 0;
+        for (Ref<EntityStore> ref : state.gridOverlay) {
+            if (ref == null || !ref.isValid()) continue;
+            try {
+                com.hypixel.hytale.server.core.modules.entity.tracker.NetworkId netIdComp =
+                        store.getComponent(ref,
+                                com.hypixel.hytale.server.core.modules.entity.tracker.NetworkId.getComponentType());
+                if (netIdComp == null) continue;
+                int netId = netIdComp.getId();
+                PlayerUtil.forEachPlayerThatCanSeeEntity(ref, (pRef, pRefComponent, ca) -> {
+                    if (!pRefComponent.getUuid().equals(owner.getUuid())) {
+                        pRefComponent.getPacketHandler().writeNoCache(
+                                new EntityUpdates(new int[]{netId}, null));
+                    }
+                }, store);
+                hidden++;
+            } catch (Exception ignored) {}
+        }
+        System.out.println("[GridMove][Grid] hideGridOverlayFromOthers: hid " + hidden + " tiles from non-owners");
+    }
+
     public static void moveFogMarker(World world, GridPlayerState state) {
         if (state.fogMarkerRef == null || !state.fogMarkerRef.isValid()) return;
         try {
@@ -511,7 +561,7 @@ public class PlayerEntityController {
                             com.hypixel.hytale.server.core.modules.entity.component.TransformComponent.getComponentType());
             if (tc != null) {
                 float nx = (state.currentGridX * 2.0f) + 1.0f;
-                float ny = state.npcY;        // same height as player standing
+                float ny = state.npcY + 2.0f;  // player body level
                 float nz = (state.currentGridZ * 2.0f) + 1.0f;
                 tc.setPosition(new com.hypixel.hytale.math.vector.Vector3d(nx, ny, nz));
                 System.out.println("[GridMove][Fog] moveFogMarker -> (" + nx + "," + ny + "," + nz + ")");

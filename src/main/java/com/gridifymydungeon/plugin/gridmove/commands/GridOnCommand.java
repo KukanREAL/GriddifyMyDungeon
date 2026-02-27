@@ -68,7 +68,7 @@ public class GridOnCommand extends AbstractPlayerCommand {
                 gmState.maxMoves       = monster.maxMoves;
 
                 world.execute(() -> {
-                    GridOverlayManager.spawnGMBFSOverlay(world, gmState, collisionDetector);
+                    GridOverlayManager.spawnGMBFSOverlay(world, gmState, collisionDetector, playerRef);
                     notify(playerRef, "Grid overlay enabled!", "Showing " + monster.getDisplayName() + "'s range",
                             "#90EE90", "Ingredient_Crystal_Green");
                 });
@@ -106,7 +106,7 @@ public class GridOnCommand extends AbstractPlayerCommand {
         }
 
         world.execute(() -> {
-            GridOverlayManager.spawnPlayerGridOverlay(world, state, collisionDetector, playerRef.getUuid());
+            GridOverlayManager.spawnPlayerGridOverlay(world, state, collisionDetector, playerRef.getUuid(), playerRef);
             String movesText = formatMoves(state.remainingMoves) + "/" + formatMoves(state.maxMoves);
             notify(playerRef, "Grid overlay enabled!", "Moves: " + movesText, "#90EE90", "Ingredient_Crystal_Green");
         });

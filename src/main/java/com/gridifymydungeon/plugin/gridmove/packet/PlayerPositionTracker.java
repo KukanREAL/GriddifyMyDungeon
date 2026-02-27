@@ -107,7 +107,7 @@ public class PlayerPositionTracker {
                     System.out.println("[GridMove] [GRID] post_cast unfreeze: re-spawning overlay for "
                             + playerRef.getUsername());
                     world.execute(() -> GridOverlayManager.spawnPlayerGridOverlay(
-                            world, state, collisionDetector, playerRef.getUuid()));
+                            world, state, collisionDetector, playerRef.getUuid(), playerRef));
                 }
             } else if (newGridX == state.currentGridX && newGridZ == state.currentGridZ) {
                 // Collision-freeze: player walked back to NPC cell — unfreeze
@@ -323,7 +323,7 @@ public class PlayerPositionTracker {
                     // Refresh grid overlay (only meaningful in combat when moves are consumed)
                     if (state.gridOverlayEnabled) {
                         GridOverlayManager.refreshGridOverlay(
-                                world, state, collisionDetector, playerRef.getUuid());
+                                world, state, collisionDetector, playerRef.getUuid(), playerRef);
                     }
                 } else {
                     // Refund moves on failed teleport (only in combat)

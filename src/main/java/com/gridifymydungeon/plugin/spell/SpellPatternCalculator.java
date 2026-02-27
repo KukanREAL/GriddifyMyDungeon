@@ -208,21 +208,38 @@ public class SpellPatternCalculator {
     private static Set<GridCell> calculateWall(Direction8 direction, int originX, int originZ, int length) {
         Set<GridCell> cells = new HashSet<>();
 
-        // Forward direction (facing direction of caster)
         int fdx = direction.getDeltaX();
         int fdz = direction.getDeltaZ();
-        // Perpendicular (sideways)
-        int perpDx = -fdz;
-        int perpDz =  fdx;
+        boolean isDiagonal = (fdx != 0 && fdz != 0);
+        int halfWidth = length / 2;          // area=2 → halfWidth=1 → 3 cells wide/deep
+        int depth     = halfWidth * 2 + 1;   // area=2 → depth=3 rows (3x3 total)
 
-        int halfWidth = length / 2;          // area=2 → halfWidth=1 → 3 cells wide (-1,0,+1)
-        int depth     = halfWidth * 2 + 1;   // area=2 → depth=3 → 3 rows deep (1..3)
-
-        for (int d = 1; d <= depth; d++) {           // forward rows, never includes caster (d=0)
-            for (int i = -halfWidth; i <= halfWidth; i++) {  // perpendicular width
-                cells.add(new GridCell(
-                        originX + fdx * d + perpDx * i,
-                        originZ + fdz * d + perpDz * i));
+        if (isDiagonal) {
+            // For diagonal directions, generate a proper 3×3 SQUARE centred 2 steps ahead
+            // in the diagonal direction. centre = (fdx*2, fdz*2) from origin.
+            // The 16 possible positions form a ring around the caster (8 cardinal + 8 diagonal).
+            // We pick the 3×3 square nearest the diagonal direction.
+            //
+            // halfWidth=1 → gather cells (cx + rx, cz + rz) for rx,rz in [-1,+1]
+            int cx = originX + fdx * (halfWidth + 1);   // centre of 3×3 (2 steps away for halfWidth=1)
+            int cz = originZ + fdz * (halfWidth + 1);
+            for (int rx = -halfWidth; rx <= halfWidth; rx++) {
+                for (int rz = -halfWidth; rz <= halfWidth; rz++) {
+                    cells.add(new GridCell(cx + rx, cz + rz));
+                }
+            }
+            // Exclude the caster's own cell (should not be in range for halfWidth=1 anyway)
+            cells.remove(new GridCell(originX, originZ));
+        } else {
+            // Cardinal direction: perpendicular sweep + depth rows in front
+            int perpDx = -fdz;
+            int perpDz =  fdx;
+            for (int d = 1; d <= depth; d++) {
+                for (int i = -halfWidth; i <= halfWidth; i++) {
+                    cells.add(new GridCell(
+                            originX + fdx * d + perpDx * i,
+                            originZ + fdz * d + perpDz * i));
+                }
             }
         }
         return cells;

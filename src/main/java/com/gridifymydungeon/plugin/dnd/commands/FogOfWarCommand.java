@@ -103,7 +103,7 @@ public class FogOfWarCommand extends AbstractPlayerCommand {
         removeFogMarker(world, state);
 
         float wx = (state.currentGridX * 2.0f) + 1.0f;
-        float wy = state.npcY;   // ground level = same height as player standing
+        float wy = state.npcY + 2.0f;  // player body level (2 blocks above NPC feet)
         float wz = (state.currentGridZ * 2.0f) + 1.0f;
 
         final GridPlayerState fState  = state;

@@ -141,7 +141,7 @@ public class GridMovePlugin extends JavaPlugin {
 
         // Player commands
         getCommandRegistry().registerCommand(new GridMoveCommand(gridMoveManager, collisionDetector, roleManager));
-        getCommandRegistry().registerCommand(new MaxTurnsCommand(gridMoveManager));
+        getCommandRegistry().registerCommand(new com.gridifymydungeon.plugin.gridmove.commands.MaxTurnsCommand(gridMoveManager));
         getCommandRegistry().registerCommand(new EndTurnCommand(
                 gridMoveManager, combatManager, combatCommand, collisionDetector,
                 encounterManager, spellVisualManager
@@ -213,7 +213,7 @@ public class GridMovePlugin extends JavaPlugin {
 
         // Help command
         getCommandRegistry().registerCommand(new GridWeatherCommand(roleManager));
-        getCommandRegistry().registerCommand(new com.gridifymydungeon.plugin.dnd.commands.TestFogCommand(gridMoveManager));
+        // TestFogCommand removed — replaced by FogOfWarCommand (/FogOfWar)
         getCommandRegistry().registerCommand(fogOfWarCommand);
         getCommandRegistry().registerCommand(new GridHelpCommand(roleManager));
 
