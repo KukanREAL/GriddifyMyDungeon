@@ -334,8 +334,59 @@ public class CastFinalCommand extends AbstractPlayerCommand {
                                     PlayerEntityController.stopNpcAnimation(world, fSt)),
                             stopDelay, java.util.concurrent.TimeUnit.MILLISECONDS);
 
-            // FIX 3: Launch projectiles based on spell type
+            // BUG FIX 6: Area-effect dispatch - handle spells that need spawnWave instead of projectiles
             SpellPattern spellPattern = spell.getPattern();
+            String spellNameLower = spellName.toLowerCase();
+
+            // Check if this is a wave-based spell (Thunderwave, Entangle, Moonbeam, etc.)
+            boolean isWaveSpell = spellNameLower.contains("thunderwave") ||
+                                 spellNameLower.contains("entangle") ||
+                                 spellNameLower.contains("moonbeam") ||
+                                 spellNameLower.contains("sunbeam") ||
+                                 spellNameLower.contains("ice_storm");
+
+            if (isWaveSpell) {
+                // Spawn wave effect for these spells instead of projectiles
+                System.out.println("[Griddify] [WAVE] Spawning wave effect for " + spellName);
+                int casterGX = castState.getCasterGridX();
+                int casterGZ = castState.getCasterGridZ();
+                List<PlayerRef> ignored = new java.util.ArrayList<>();
+                ignored.add(playerRef);
+
+                if (spellNameLower.contains("entangle")) {
+                    if (effectDelayMs > 0) {
+                        java.util.concurrent.Executors.newSingleThreadScheduledExecutor()
+                                .schedule(() -> world.execute(() ->
+                                        SpellVisualEffect.spawnEntangle(world, fAffectedCells, fSt.npcY)),
+                                        effectDelayMs, java.util.concurrent.TimeUnit.MILLISECONDS);
+                    } else {
+                        SpellVisualEffect.spawnEntangle(world, fAffectedCells, fSt.npcY);
+                    }
+                } else if (spellNameLower.contains("ice_storm")) {
+                    if (effectDelayMs > 0) {
+                        java.util.concurrent.Executors.newSingleThreadScheduledExecutor()
+                                .schedule(() -> world.execute(() ->
+                                        SpellVisualEffect.spawnIceStorm(world, fAffectedCells, fSt.npcY, ignored)),
+                                        effectDelayMs, java.util.concurrent.TimeUnit.MILLISECONDS);
+                    } else {
+                        SpellVisualEffect.spawnIceStorm(world, fAffectedCells, fSt.npcY, ignored);
+                    }
+                } else {
+                    // Default to spawnWave (Thunderwave, Moonbeam, Sunbeam)
+                    if (effectDelayMs > 0) {
+                        java.util.concurrent.Executors.newSingleThreadScheduledExecutor()
+                                .schedule(() -> world.execute(() ->
+                                        SpellVisualEffect.spawnWave(spellName, 1.0f, world, casterGX, casterGZ, fSt.npcY, fAffectedCells, ignored, fFaceYaw)),
+                                        effectDelayMs, java.util.concurrent.TimeUnit.MILLISECONDS);
+                    } else {
+                        SpellVisualEffect.spawnWave(spellName, 1.0f, world, casterGX, casterGZ, fSt.npcY, fAffectedCells, ignored, fFaceYaw);
+                    }
+                }
+                // Skip projectile logic for wave spells
+                return;
+            }
+
+            // FIX 3: Launch projectiles based on spell type
             String[] projectileData = pickProjectileModel(spell);
 
             if (projectileData != null && fSt.npcEntity != null && fSt.npcEntity.isValid()) {
@@ -345,7 +396,7 @@ public class CastFinalCommand extends AbstractPlayerCommand {
                 final double startY = fSt.npcY + 1.4;
                 final double startZ = fCasterWZ;
 
-                // Special case: Magic_Missile fires 3 projectiles per target cell
+                // Special case: Magic_Missile fires projectiles per target cell
                 boolean isMagicMissile = spellName.equalsIgnoreCase("Magic_Missile");
 
                 // Special case: CONE/LINE/WALL spells (like Burning_Hands) fire projectiles to each affected cell
@@ -354,17 +405,14 @@ public class CastFinalCommand extends AbstractPlayerCommand {
                                            spellPattern == SpellPattern.WALL);
 
                 if (isMagicMissile) {
-                    // Magic_Missile: Fire 3 projectiles per confirmed target
-                    System.out.println("[Griddify] [PROJECTILE] Magic_Missile - firing 3 per target");
+                    // BUG FIX: Magic_Missile fires 1 projectile per target, not 3
+                    System.out.println("[Griddify] [PROJECTILE] Magic_Missile - firing 1 per target");
                     for (SpellPatternCalculator.GridCell targetCell : fAffectedCells) {
                         final double endX = targetCell.x * 2.0f + 1.0f;
                         final double endY = fSt.npcY + 1.4;
                         final double endZ = targetCell.z * 2.0f + 1.0f;
 
-                        for (int i = 0; i < 3; i++) {
-                            final int missileNum = i;
-                            long launchDelay = effectDelayMs + (i * 200L); // Stagger by 200ms each
-
+                        if (effectDelayMs > 0) {
                             java.util.concurrent.Executors.newSingleThreadScheduledExecutor()
                                     .schedule(() -> world.execute(() ->
                                             SpellVisualEffect.launchProjectile(
@@ -372,7 +420,13 @@ public class CastFinalCommand extends AbstractPlayerCommand {
                                                     startX, startY, startZ,
                                                     endX, endY, endZ,
                                                     fFaceYaw, 600L)),
-                                            launchDelay, java.util.concurrent.TimeUnit.MILLISECONDS);
+                                            effectDelayMs, java.util.concurrent.TimeUnit.MILLISECONDS);
+                        } else {
+                            SpellVisualEffect.launchProjectile(
+                                    projectileModel, projectileScale, world,
+                                    startX, startY, startZ,
+                                    endX, endY, endZ,
+                                    fFaceYaw, 600L);
                         }
                     }
                 } else if (isAreaProjectile) {
@@ -498,8 +552,9 @@ public class CastFinalCommand extends AbstractPlayerCommand {
     // ── Helpers ──────────────────────────────────────────────────────────────────
 
     /**
-     * FIX 4: Pick animation asset ID and itemAnimationsId based on weapon/spell type.
+     * BUG FIX 5: Pick animation asset ID and itemAnimationsId based on weapon/spell type.
      * Returns [animationId, itemAnimationsId].
+     * Fixed to use full animation names (e.g., "CastSummonCharging") with null itemAnimationsId.
      */
     private static String[] pickCastAnimation(SpellData spell) {
         String spellName = spell.getName();
@@ -511,38 +566,38 @@ public class CastFinalCommand extends AbstractPlayerCommand {
         boolean isSpellbookWeapon = spellName.toLowerCase().contains("spellbook") ||
                                     (pattern == SpellPattern.CONE || pattern == SpellPattern.WALL || pattern == SpellPattern.LINE);
 
-        // Bow Shot: "Shoot" animation with "Charging" itemAnimationsId
+        // Bow Shot: full animation name with null itemAnimationsId (base character animation)
         if (isBowShot) {
-            return new String[]{"Shoot", "Charging"};
+            return new String[]{"ShootCharging", null};
         }
 
-        // Staff weapon: "CastSummon" animation with "Charging" itemAnimationsId
+        // Staff weapon: full animation name with null itemAnimationsId
         if (isStaffWeapon) {
-            return new String[]{"CastSummon", "Charging"};
+            return new String[]{"CastSummonCharging", null};
         }
 
-        // Spellbook weapon: "CastHurl" animation with "Charging" itemAnimationsId
+        // Spellbook weapon: full animation name with null itemAnimationsId
         if (isSpellbookWeapon) {
-            return new String[]{"CastHurl", "Charging"};
+            return new String[]{"CastHurlCharging", null};
         }
 
-        // Longsword: "SwingRight" animation with "Longsword" itemAnimationsId
+        // Longsword: "SwingRight" with "Longsword" itemAnimationsId (unchanged)
         if (spell.getDamageType() == DamageType.SLASHING) {
             return new String[]{"SwingRight", "Longsword"};
         }
 
-        // Unarmed: "SwingLeft" animation with "Default" itemAnimationsId
+        // Unarmed: "SwingLeft" with "Default" itemAnimationsId (unchanged)
         if (spellName.equalsIgnoreCase("Unarmed_Strike")) {
             return new String[]{"SwingLeft", "Default"};
         }
 
-        // Healing spells
+        // Healing spells: full animation name with null itemAnimationsId
         if (spell.isHealingSpell()) {
-            return new String[]{"CastSummon", "Charging"};
+            return new String[]{"CastSummonCharging", null};
         }
 
-        // Generic magic spells
-        return new String[]{"CastHurl", "Charging"};
+        // Generic magic spells: full animation name with null itemAnimationsId
+        return new String[]{"CastHurlCharging", null};
     }
 
     /**

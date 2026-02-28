@@ -52,10 +52,12 @@ public class GridOverlayManager {
 
     private static final String MODEL_PLAYER  = "Grid_Player"; // blue
     private static final String MODEL_DEFAULT = "Grid_Basic";  // grey
+    private static final String MODEL_DIFFICULT = "Grid_Difficult"; // BUG FIX: difficult terrain
     private static final String FALLBACK_MODEL = "Debug";
 
     private static Model cachedPlayerModel  = null;
     private static Model cachedDefaultModel = null;
+    private static Model cachedDifficultModel = null; // BUG FIX
     private static boolean modelsAttempted  = false;
 
     private static final int MAX_OVERLAY_CELLS = 150;
@@ -343,8 +345,12 @@ public class GridOverlayManager {
             float cz = (cell.gridZ * 2.0f) + 1.0f;
             float targetY = cell.groundY + yOffset;
 
+            // BUG FIX: Check if cell has difficult terrain and use Grid_Difficult model
+            boolean isDifficult = TerrainManager.isDifficult(cell.gridX, cell.gridZ, cell.groundY, world);
+            Model tileModel = isDifficult ? cachedDifficultModel : model;
+
             // Spawn at y=-30 (invisible), then teleport to real Y
-            Ref<EntityStore> ref = spawnTile(store, model, cx, -30f, cz);
+            Ref<EntityStore> ref = spawnTile(store, tileModel, cx, -30f, cz);
             if (ref == null) continue;
 
             // Teleport to real position
@@ -361,8 +367,9 @@ public class GridOverlayManager {
         state.gridOverlay.clear();
         state.gridOverlay.addAll(state.gridTileMap.values());
 
-        // 4. Hide newly spawned tiles after 150ms (first time only, then flag prevents re-hiding)
-        if (owner != null && spawned > 0 && !state.gridTilesHiddenFromOthers) {
+        // 4. Always re-hide ALL tiles after 150ms on every refresh (not just newly spawned)
+        // This fixes bug where tiles become visible after entity tracker updates
+        if (owner != null) {
             SCHED.schedule(() -> world.execute(() -> {
                 com.gridifymydungeon.plugin.dnd.PlayerEntityController
                         .hideGridOverlayFromOthers(world, state, owner);
@@ -382,6 +389,7 @@ public class GridOverlayManager {
         }
         state.gridOverlay.clear();
         state.gridTileMap.clear(); // FIX #9: also clear the reuse map
+        state.gridTilesHiddenFromOthers = false; // BUG FIX: reset flag so next spawn will hide tiles
     }
 
     // ========================================================
@@ -561,11 +569,13 @@ public class GridOverlayManager {
         modelsAttempted = true;
         cachedPlayerModel  = loadModel(MODEL_PLAYER);
         cachedDefaultModel = loadModel(MODEL_DEFAULT);
+        cachedDifficultModel = loadModel(MODEL_DIFFICULT); // BUG FIX
         if (cachedPlayerModel  == null) cachedPlayerModel  = cachedDefaultModel;
         if (cachedDefaultModel == null) {
             cachedDefaultModel = loadModel(FALLBACK_MODEL);
             cachedPlayerModel  = cachedDefaultModel;
         }
+        if (cachedDifficultModel == null) cachedDifficultModel = cachedPlayerModel; // BUG FIX: fallback
     }
 
     private static Model loadModel(String id) {

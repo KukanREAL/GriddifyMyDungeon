@@ -286,15 +286,9 @@ public class SpellVisualManager {
 
                 float targetY = groundY + RANGE_Y_OFFSET; // FIX #3
 
-                // FIX #1: Spawn at y=-30 (invisible to all), then teleport to real Y
-                Ref<EntityStore> ref = spawnTile(store, model, cx, -30f, cz2);
+                // BUG FIX: Spawn directly at real Y so entity tracker registers position before hide packet
+                Ref<EntityStore> ref = spawnTile(store, model, cx, targetY, cz2);
                 if (ref == null) continue;
-
-                // Teleport to real position
-                try {
-                    TransformComponent tc = store.getComponent(ref, TransformComponent.getComponentType());
-                    if (tc != null) tc.setPosition(new Vector3d(cx, targetY, cz2));
-                } catch (Exception ignored) {}
 
                 refs.add(ref);
             }
