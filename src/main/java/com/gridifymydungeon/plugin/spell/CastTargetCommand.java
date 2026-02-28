@@ -87,7 +87,7 @@ public class CastTargetCommand extends AbstractPlayerCommand {
                     spell, aimX, aimZ);
             castState.setConfirmedCells(cells, aimX, aimZ);
             final float refY = castState.getCasterY();
-            world.execute(() -> visualManager.showSpellArea(playerRef.getUuid(), cells, world, refY));
+            world.execute(() -> visualManager.showSpellArea(playerRef.getUuid(), cells, world, refY, playerRef));
             playerRef.sendMessage(Message.raw("[Griddify] " + spell.getName()
                     + " locked — " + cells.size() + " cells. Use /CastFinal to fire.").color("#00FF7F"));
             return;
@@ -129,7 +129,7 @@ public class CastTargetCommand extends AbstractPlayerCommand {
 
         world.execute(() -> {
             // showSpellArea clears all visuals then draws base overlay for the current aim cell
-            visualManager.showSpellArea(playerRef.getUuid(), finalCells, world, refY);
+            visualManager.showSpellArea(playerRef.getUuid(), finalCells, world, refY, playerRef);
             // Re-add stacked tiles for ALL confirmed cells (including this one)
             for (java.util.Map.Entry<String, Integer> e : finalHitCounts.entrySet()) {
                 String[] parts = e.getKey().split(",");

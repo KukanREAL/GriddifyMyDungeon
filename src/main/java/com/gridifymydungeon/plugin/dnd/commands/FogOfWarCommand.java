@@ -43,8 +43,10 @@ public class FogOfWarCommand extends AbstractPlayerCommand {
     static final String FOG_MODEL = "Fog_Of_War";
 
     // FIX #6: Two fog layer scales
-    private static final float INNER_SCALE = 5.5f; // 11×11 tiles
-    private static final float OUTER_SCALE = 6.5f; // 13×13 tiles
+    // User wants 11 grids (11×2 = 22 blocks), so 26x26 blocks to cover 13 grids
+    // User wants 13 grids (13×2 = 26 blocks), so 28x28 blocks to cover 14 grids
+    private static final float INNER_SCALE = 26.0f; // 26×26 blocks = 13×13 grids
+    private static final float OUTER_SCALE = 28.0f; // 28×28 blocks = 14×14 grids
 
     private final GridMoveManager gridMoveManager;
     private final RoleManager     roleManager;

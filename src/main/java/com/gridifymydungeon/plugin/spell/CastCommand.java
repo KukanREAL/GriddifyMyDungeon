@@ -150,7 +150,7 @@ public class CastCommand extends AbstractPlayerCommand {
             Set<SpellPatternCalculator.GridCell> cells = SpellPatternCalculator.calculatePattern(
                     pattern, initialDirection, casterGridX, casterGridZ,
                     spell.getRangeGrids(), spell.getAreaGrids());
-            visualManager.showSpellArea(playerRef.getUuid(), cells, world, playerY);
+            visualManager.showSpellArea(playerRef.getUuid(), cells, world, playerY, playerRef);
             state.setSpellCastingState(new SpellCastingState(spell, null, initialDirection, casterGridX, casterGridZ, casterY));
 
             playerRef.sendMessage(Message.raw("[Griddify] " + spellLabel(spell) + " ready!").color("#FFD700"));
@@ -164,7 +164,7 @@ public class CastCommand extends AbstractPlayerCommand {
             Set<SpellPatternCalculator.GridCell> cells = SpellPatternCalculator.calculatePattern(
                     pattern, initialDirection, casterGridX, casterGridZ,
                     spell.getRangeGrids(), spell.getAreaGrids());
-            visualManager.showSpellArea(playerRef.getUuid(), cells, world, playerY);
+            visualManager.showSpellArea(playerRef.getUuid(), cells, world, playerY, playerRef);
             state.setSpellCastingState(new SpellCastingState(spell, null, initialDirection, casterGridX, casterGridZ, casterY));
             playerRef.sendMessage(Message.raw("[Griddify] Chromatic Orb prepared!").color("#DA70D6"));
             playerRef.sendMessage(Message.raw("[Griddify] Choose element: /orb {acid | fire | cold | lightning | poison | thunder}").color("#DA70D6"));
@@ -194,7 +194,7 @@ public class CastCommand extends AbstractPlayerCommand {
 
         Set<SpellPatternCalculator.GridCell> initialCells = computeOverlay(
                 pattern, initialDirection, casterGridX, casterGridZ, spell, casterGridX, casterGridZ);
-        visualManager.showSpellArea(playerRef.getUuid(), initialCells, world, playerY);
+        visualManager.showSpellArea(playerRef.getUuid(), initialCells, world, playerY, playerRef);
 
         String label = spellLabel(spell);
         System.out.println("[Griddify] [CAST] /Cast " + spell.getName()

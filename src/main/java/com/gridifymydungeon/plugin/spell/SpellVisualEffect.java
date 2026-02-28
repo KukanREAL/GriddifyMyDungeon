@@ -343,6 +343,62 @@ public class SpellVisualEffect {
         float wz = (gridZ * 2.0f) + 1.0f;
         spawnWithTimeout("Mark", 1.0f, world, wx, wy, wz, 0f, lifetimeMs);
     }
+    /**
+     * Launch a flying projectile from start to end position over durationMs.
+     * The entity moves smoothly and despawns when it reaches the target.
+     * Must be called inside world.execute().
+     */
+    public static void launchProjectile(String modelAssetId, float entityScale,
+                                       World world,
+                                       double startX, double startY, double startZ,
+                                       double endX, double endY, double endZ,
+                                       float yaw, long durationMs) {
+        Model model = getModel(modelAssetId, entityScale);
+        if (model == null) return;
+
+        // Spawn at start position
+        Ref<EntityStore> ref = spawnEntity(model, world, startX, startY, startZ, 0f, yaw, 0f);
+        if (ref == null) return;
+
+        // Calculate movement per tick
+        double dx = endX - startX;
+        double dy = endY - startY;
+        double dz = endZ - startZ;
+        long tickMs = 50L; // 20 ticks per second
+        long steps = Math.max(1, durationMs / tickMs);
+        double dxPerTick = dx / steps;
+        double dyPerTick = dy / steps;
+        double dzPerTick = dz / steps;
+
+        // Animate movement
+        Thread flyThread = new Thread(() -> {
+            double x = startX;
+            double y = startY;
+            double z = startZ;
+            for (int i = 0; i < steps; i++) {
+                try { Thread.sleep(tickMs); } catch (InterruptedException e) { break; }
+                if (!ref.isValid()) return;
+                x += dxPerTick;
+                y += dyPerTick;
+                z += dzPerTick;
+                final double fx = x, fy = y, fz = z;
+                world.execute(() -> {
+                    if (!ref.isValid()) return;
+                    try {
+                        Store<EntityStore> store = world.getEntityStore().getStore();
+                        TransformComponent tc = store.getComponent(ref, TransformComponent.getComponentType());
+                        if (tc != null) tc.setPosition(new Vector3d(fx, fy, fz));
+                    } catch (Exception ignored) {}
+                });
+            }
+            // Despawn when reaching target
+            world.execute(() -> despawn(world, ref));
+        });
+        flyThread.setDaemon(true);
+        flyThread.setName("griddify-projectile");
+        flyThread.start();
+    }
+
     public static void despawn(World world, @Nullable Ref<EntityStore> ref) {
         if (ref == null || !ref.isValid()) return;
         try { world.getEntityStore().getStore().removeEntity(ref, RemoveReason.REMOVE); }

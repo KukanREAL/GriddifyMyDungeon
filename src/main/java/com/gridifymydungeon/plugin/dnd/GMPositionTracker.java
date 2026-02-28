@@ -96,7 +96,7 @@ public class GMPositionTracker {
                             java.util.Set<com.gridifymydungeon.plugin.spell.SpellPatternCalculator.GridCell> cells =
                                     com.gridifymydungeon.plugin.spell.CastCommand.computeOverlay(
                                             pattern, dir, cx, cz, spellData, px, pz);
-                            spellVisualManager.showSpellArea(playerRef.getUuid(), cells, world, py);
+                            spellVisualManager.showSpellArea(playerRef.getUuid(), cells, world, py, playerRef);
                         });
                         lastMoveTime.put(playerRef, now);
                     }

@@ -552,25 +552,53 @@ public class PlayerEntityController {
         System.out.println("[GridMove][Grid] hideGridOverlayFromOthers: hid " + hidden + " tiles from non-owners");
     }
 
+    /**
+     * Move both fog markers (inner 11x11 and outer 13x13) to follow the player's NPC.
+     * FIX #8: Now moves both fogMarkerRef (inner) and fogMarkerRef2 (outer).
+     */
     public static void moveFogMarker(World world, GridPlayerState state) {
-        if (state.fogMarkerRef == null || !state.fogMarkerRef.isValid()) return;
-        try {
-            Store<EntityStore> store = world.getEntityStore().getStore();
-            com.hypixel.hytale.server.core.modules.entity.component.TransformComponent tc =
-                    store.getComponent(state.fogMarkerRef,
-                            com.hypixel.hytale.server.core.modules.entity.component.TransformComponent.getComponentType());
-            if (tc != null) {
-                float nx = (state.currentGridX * 2.0f) + 1.0f;
-                float ny = state.npcY + 2.0f;  // player body level
-                float nz = (state.currentGridZ * 2.0f) + 1.0f;
-                tc.setPosition(new com.hypixel.hytale.math.vector.Vector3d(nx, ny, nz));
-                System.out.println("[GridMove][Fog] moveFogMarker -> (" + nx + "," + ny + "," + nz + ")");
-                if (state.fogMarkerNetId >= 0 && state.playerRef != null) {
-                    hideEntityFromOthers(world, state.fogMarkerRef, state.playerRef, state.fogMarkerNetId);
+        float nx = (state.currentGridX * 2.0f) + 1.0f;
+        float ny = state.npcY + 2.0f;  // player body level
+        float nz = (state.currentGridZ * 2.0f) + 1.0f;
+
+        // Move inner 11x11 fog marker
+        if (state.fogMarkerRef != null && state.fogMarkerRef.isValid()) {
+            try {
+                Store<EntityStore> store = world.getEntityStore().getStore();
+                com.hypixel.hytale.server.core.modules.entity.component.TransformComponent tc =
+                        store.getComponent(state.fogMarkerRef,
+                                com.hypixel.hytale.server.core.modules.entity.component.TransformComponent.getComponentType());
+                if (tc != null) {
+                    tc.setPosition(new com.hypixel.hytale.math.vector.Vector3d(nx, ny, nz));
+                    if (state.fogMarkerNetId >= 0 && state.playerRef != null) {
+                        hideEntityFromOthers(world, state.fogMarkerRef, state.playerRef, state.fogMarkerNetId);
+                    }
                 }
+            } catch (Exception e) {
+                System.err.println("[GridMove][Fog] moveFogMarker (inner) failed: " + e.getMessage());
             }
-        } catch (Exception e) {
-            System.err.println("[GridMove][Fog] moveFogMarker failed: " + e.getMessage());
+        }
+
+        // Move outer 13x13 fog marker
+        if (state.fogMarkerRef2 != null && state.fogMarkerRef2.isValid()) {
+            try {
+                Store<EntityStore> store = world.getEntityStore().getStore();
+                com.hypixel.hytale.server.core.modules.entity.component.TransformComponent tc2 =
+                        store.getComponent(state.fogMarkerRef2,
+                                com.hypixel.hytale.server.core.modules.entity.component.TransformComponent.getComponentType());
+                if (tc2 != null) {
+                    tc2.setPosition(new com.hypixel.hytale.math.vector.Vector3d(nx, ny, nz));
+                    if (state.fogMarkerNetId2 >= 0 && state.playerRef != null) {
+                        hideEntityFromOthers(world, state.fogMarkerRef2, state.playerRef, state.fogMarkerNetId2);
+                    }
+                }
+            } catch (Exception e) {
+                System.err.println("[GridMove][Fog] moveFogMarker (outer) failed: " + e.getMessage());
+            }
+        }
+
+        if (state.fogMarkerRef != null || state.fogMarkerRef2 != null) {
+            System.out.println("[GridMove][Fog] moveFogMarker -> (" + nx + "," + ny + "," + nz + ")");
         }
     }
 

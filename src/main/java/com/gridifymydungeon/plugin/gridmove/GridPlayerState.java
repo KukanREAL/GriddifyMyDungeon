@@ -65,6 +65,13 @@ public class GridPlayerState {
     /** True when the overlay is the GM static /grid map, false when it's BFS range. */
     public boolean gmMapOverlayActive = false;
 
+    // FIX: Grid tile reuse map — tracks entities by grid coordinates for teleportation
+    // Key: "x,z" (e.g., "5,10"), Value: EntityStore Ref
+    public java.util.Map<String, Ref<EntityStore>> gridTileMap = new java.util.HashMap<>();
+
+    // FIX: Track if grid tiles have been hidden from other players (only hide once, not on every teleport)
+    public boolean gridTilesHiddenFromOthers = false;
+
     // ── SPELL RANGE overlay — Grid_Range tiles shown during /cast ───────────
     // FIX #1: Stored per-player so clearRangeOverlay() can remove them at /castfinal or /castcancel
     public List<Ref<EntityStore>> rangeOverlay = new ArrayList<>();

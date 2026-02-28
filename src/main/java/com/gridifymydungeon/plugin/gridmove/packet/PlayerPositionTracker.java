@@ -169,9 +169,24 @@ public class PlayerPositionTracker {
                         java.util.Set<SpellPatternCalculator.GridCell> cells =
                                 com.gridifymydungeon.plugin.spell.CastCommand.computeOverlay(
                                         pattern, dir, cx, cz, spellData, px, pz);
+
+                        // FIX: Filter cells to only include those within spell range from caster
+                        // This prevents melee spells from showing targets outside the Grid_Range ring
+                        final int maxRange = spellData.getRangeGrids();
+                        if (maxRange > 0) {
+                            cells.removeIf(cell -> {
+                                int dist = SpellPatternCalculator.getDistance(cx, cz, cell.x, cell.z);
+                                return dist > maxRange;
+                            });
+                        }
+
                         // Also keep previously confirmed target cells visible
                         for (SpellCastingState.GridCell c : confirmed) {
-                            cells.add(new SpellPatternCalculator.GridCell(c.x, c.z));
+                            // Only add if within range
+                            int dist = SpellPatternCalculator.getDistance(cx, cz, c.x, c.z);
+                            if (maxRange == 0 || dist <= maxRange) {
+                                cells.add(new SpellPatternCalculator.GridCell(c.x, c.z));
+                            }
                         }
                         System.out.println("[Griddify] [CASTOVERLAY] " + spellData.getName()
                                 + " pattern=" + pattern.name()
@@ -179,7 +194,7 @@ public class PlayerPositionTracker {
                                 + " caster=(" + cx + "," + cz + ")"
                                 + " player=(" + px + "," + pz + ")"
                                 + " cells=" + cells.size());
-                        spellVisualManager.showSpellArea(playerRef.getUuid(), cells, world, py);
+                        spellVisualManager.showSpellArea(playerRef.getUuid(), cells, world, py, playerRef);
                     });
                 }
             }

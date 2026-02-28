@@ -84,11 +84,21 @@ public class SpellVisualManager {
     // ========================================================
 
     /**
-     * Show spell impact area in red.
+     * Show spell impact area in red (private to owner).
      * FIX #3: Uses SPELL_Y_OFFSET (+0.05) so it renders above Grid_Range.
+     * FIX #2: Spawn at y=-30, teleport to real Y, hide from non-owners.
      */
     public void showSpellArea(UUID playerUUID, Set<SpellPatternCalculator.GridCell> cells,
                               World world, float playerY) {
+        showSpellArea(playerUUID, cells, world, playerY, null);
+    }
+
+    /**
+     * Show spell impact area in red, optionally private to owner.
+     * @param owner PlayerRef for privacy filter (null = visible to all)
+     */
+    public void showSpellArea(UUID playerUUID, Set<SpellPatternCalculator.GridCell> cells,
+                              World world, float playerY, PlayerRef owner) {
         clearSpellVisuals(playerUUID, world);
 
         Model model = getModel(SPELL_MODEL_ID);
@@ -108,14 +118,38 @@ public class SpellVisualManager {
             Float groundY = MonsterEntityController.scanForGroundPublic(world, cell.x, cell.z, referenceY + 3.0f);
             if (groundY == null) groundY = referenceY;
 
-            float y = groundY + SPELL_Y_OFFSET; // FIX #3
-            Ref<EntityStore> ref = spawnTile(store, model, cx, y, cz);
-            if (ref != null) newVisuals.add(ref);
+            float targetY = groundY + SPELL_Y_OFFSET;
+
+            // FIX #2: Spawn at y=-30 (invisible to all), then teleport to real Y
+            Ref<EntityStore> ref = (owner != null)
+                    ? spawnTile(store, model, cx, -30f, cz)
+                    : spawnTile(store, model, cx, targetY, cz);
+            if (ref == null) continue;
+
+            // Teleport to real position if spawned privately
+            if (owner != null) {
+                try {
+                    TransformComponent tc = store.getComponent(ref, TransformComponent.getComponentType());
+                    if (tc != null) tc.setPosition(new Vector3d(cx, targetY, cz));
+                } catch (Exception ignored) {}
+            }
+
+            newVisuals.add(ref);
         }
 
         playerSpellVisuals.put(playerUUID, newVisuals);
+
+        // FIX #2: Hide from non-owners after entity-tracker has had time to broadcast
+        if (owner != null) {
+            final List<Ref<EntityStore>> finalRefs = newVisuals;
+            final PlayerRef finalOwner = owner;
+            SCHED.schedule(() -> world.execute(() ->
+                    hideRefsFromOthers(world, finalRefs, finalOwner)
+            ), 150L, TimeUnit.MILLISECONDS);
+        }
+
         System.out.println("[Griddify] [SPELL] Spell overlay: " + cells.size() +
-                " cells → " + newVisuals.size() + " placed");
+                " cells → " + newVisuals.size() + " placed" + (owner != null ? " (private)" : ""));
     }
 
     public void clearSpellVisuals(UUID playerUUID, World world) {

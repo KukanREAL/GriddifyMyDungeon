@@ -95,6 +95,7 @@ public class GridOverlayManager {
     /**
      * Player /gridon with PlayerRef for privacy filter.
      * FIX #3: Tiles are private to the owning player.
+     * FIX #9: Reuses existing tiles by teleporting them instead of despawning/respawning.
      */
     public static boolean spawnPlayerGridOverlay(World world, GridPlayerState state,
                                                  CollisionDetector collisionDetector,
@@ -102,17 +103,19 @@ public class GridOverlayManager {
         ensureModels();
         Model model = cachedPlayerModel != null ? cachedPlayerModel : cachedDefaultModel;
         if (model == null) return false;
-        removeGridOverlayEntities(world, state);
+
         List<ReachableCell> cells = floodFillReachable(world, state, collisionDetector, excludePlayer);
-        // FIX #3: Grid_Player height offset +0.02; spawn privately if owner provided
+
+        // FIX #9: Reuse/teleport existing tiles instead of removing and respawning
         if (owner != null) {
-            spawnCellsPrivate(world, state, cells, model, 0.02f, owner);
+            updateCellsWithReuse(world, state, cells, model, 0.02f, owner);
         } else {
-            spawnCells(world, state, cells, model, 0.02f);
+            updateCellsWithReuse(world, state, cells, model, 0.02f, null);
         }
+
         state.gridOverlayEnabled = true;
         state.gmMapOverlayActive = false;
-        System.out.println("[GridMove] [GRID] Player overlay: " + cells.size() + " cells");
+        System.out.println("[GridMove] [GRID] Player overlay: " + cells.size() + " cells (reuse)");
         return true;
     }
 
@@ -267,6 +270,109 @@ public class GridOverlayManager {
         ), 150L, TimeUnit.MILLISECONDS);
     }
 
+    /**
+     * FIX #9: Update grid overlay by reusing existing tiles (teleport) instead of despawn/respawn.
+     * This prevents flickering when the player moves.
+     */
+    private static void updateCellsWithReuse(World world, GridPlayerState state,
+                                             List<ReachableCell> newCells, Model model,
+                                             float yOffset, PlayerRef owner) {
+        Store<EntityStore> store = world.getEntityStore().getStore();
+
+        // Build set of new cell coordinates
+        java.util.Set<String> newCoords = new java.util.HashSet<>();
+        java.util.Map<String, ReachableCell> newCellMap = new java.util.HashMap<>();
+        for (ReachableCell cell : newCells) {
+            String key = cell.gridX + "," + cell.gridZ;
+            newCoords.add(key);
+            newCellMap.put(key, cell);
+        }
+
+        // 1. Collect tiles to teleport (don't teleport yet - hide them first!)
+        int reused = 0;
+        java.util.List<Ref<EntityStore>> tilesToTeleport = new java.util.ArrayList<>();
+        java.util.List<ReachableCell> teleportDestinations = new java.util.ArrayList<>();
+
+        for (String key : new java.util.HashSet<>(state.gridTileMap.keySet())) {
+            if (newCoords.contains(key)) {
+                // Tile exists and is still needed — mark for teleport
+                Ref<EntityStore> ref = state.gridTileMap.get(key);
+                if (ref != null && ref.isValid()) {
+                    ReachableCell cell = newCellMap.get(key);
+                    tilesToTeleport.add(ref);
+                    teleportDestinations.add(cell);
+                    reused++;
+                }
+                newCoords.remove(key); // already handled
+            } else {
+                // Tile exists but is no longer needed — despawn it
+                Ref<EntityStore> ref = state.gridTileMap.remove(key);
+                if (ref != null && ref.isValid()) {
+                    try { store.removeEntity(ref, RemoveReason.REMOVE); } catch (Exception ignored) {}
+                }
+            }
+        }
+
+        // 1a. For private grids: hide tiles ONLY ONCE after initial spawn (not on every move!)
+        // After first hide, tiles stay hidden and we just teleport them
+        boolean needsInitialHide = (owner != null && !state.gridTilesHiddenFromOthers && !state.gridOverlay.isEmpty());
+        if (needsInitialHide) {
+            com.gridifymydungeon.plugin.dnd.PlayerEntityController
+                    .hideGridOverlayFromOthers(world, state, owner);
+            state.gridTilesHiddenFromOthers = true;
+        }
+
+        // 1b. Teleport the reused tiles (if already hidden, other players still can't see position updates)
+        for (int i = 0; i < tilesToTeleport.size(); i++) {
+            Ref<EntityStore> ref = tilesToTeleport.get(i);
+            ReachableCell cell = teleportDestinations.get(i);
+            float cx = (cell.gridX * 2.0f) + 1.0f;
+            float cz = (cell.gridZ * 2.0f) + 1.0f;
+            float y = cell.groundY + yOffset;
+            try {
+                TransformComponent tc = store.getComponent(ref, TransformComponent.getComponentType());
+                if (tc != null) tc.setPosition(new Vector3d(cx, y, cz));
+            } catch (Exception ignored) {}
+        }
+
+        // 2. Spawn new tiles for cells that don't have entities yet
+        int spawned = 0;
+        for (String key : newCoords) {
+            ReachableCell cell = newCellMap.get(key);
+            float cx = (cell.gridX * 2.0f) + 1.0f;
+            float cz = (cell.gridZ * 2.0f) + 1.0f;
+            float targetY = cell.groundY + yOffset;
+
+            // Spawn at y=-30 (invisible), then teleport to real Y
+            Ref<EntityStore> ref = spawnTile(store, model, cx, -30f, cz);
+            if (ref == null) continue;
+
+            // Teleport to real position
+            try {
+                TransformComponent tc = store.getComponent(ref, TransformComponent.getComponentType());
+                if (tc != null) tc.setPosition(new Vector3d(cx, targetY, cz));
+            } catch (Exception ignored) {}
+
+            state.gridTileMap.put(key, ref);
+            spawned++;
+        }
+
+        // 3. Rebuild gridOverlay list from the map
+        state.gridOverlay.clear();
+        state.gridOverlay.addAll(state.gridTileMap.values());
+
+        // 4. Hide newly spawned tiles after 150ms (first time only, then flag prevents re-hiding)
+        if (owner != null && spawned > 0 && !state.gridTilesHiddenFromOthers) {
+            SCHED.schedule(() -> world.execute(() -> {
+                com.gridifymydungeon.plugin.dnd.PlayerEntityController
+                        .hideGridOverlayFromOthers(world, state, owner);
+                state.gridTilesHiddenFromOthers = true;
+            }), 150L, TimeUnit.MILLISECONDS);
+        }
+
+        System.out.println("[GridMove] [GRID] updateCellsWithReuse: reused=" + reused + " spawned=" + spawned);
+    }
+
     private static void removeGridOverlayEntities(World world, GridPlayerState state) {
         Store<EntityStore> store = world.getEntityStore().getStore();
         for (Ref<EntityStore> ref : state.gridOverlay) {
@@ -275,6 +381,7 @@ public class GridOverlayManager {
             }
         }
         state.gridOverlay.clear();
+        state.gridTileMap.clear(); // FIX #9: also clear the reuse map
     }
 
     // ========================================================
