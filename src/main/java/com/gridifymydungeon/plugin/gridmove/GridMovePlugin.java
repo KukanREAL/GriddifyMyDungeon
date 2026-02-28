@@ -205,7 +205,7 @@ public class GridMovePlugin extends JavaPlugin {
         getCommandRegistry().registerCommand(new ListSpellsCommand(gridMoveManager, roleManager, encounterManager));
         getCommandRegistry().registerCommand(new CastCommand(gridMoveManager, encounterManager, spellVisualManager, roleManager, collisionDetector));
         getCommandRegistry().registerCommand(new CastTargetCommand(gridMoveManager, spellVisualManager));
-        getCommandRegistry().registerCommand(new CastFinalCommand(gridMoveManager, encounterManager, spellVisualManager, combatSettings, roleManager, wildShapeManager, polymorphManager));
+        getCommandRegistry().registerCommand(new CastFinalCommand(gridMoveManager, encounterManager, spellVisualManager, combatSettings, roleManager));
         getCommandRegistry().registerCommand(new CastCancelCommand(gridMoveManager, spellVisualManager, encounterManager, roleManager));
         getCommandRegistry().registerCommand(new com.gridifymydungeon.plugin.spell.OrbCommand(gridMoveManager));
         getCommandRegistry().registerCommand(new com.gridifymydungeon.plugin.spell.PolyformCommand(gridMoveManager, encounterManager, polymorphManager));

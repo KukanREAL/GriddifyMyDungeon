@@ -31,6 +31,7 @@ import java.util.Set;
 /**
  * /gridmove - Enable grid movement mode
  * UPDATED: Uses popup notifications instead of chat messages
+ * FIX: Unfreeze + clear spell state on deactivate/activate to prevent permanent freeze after /castfinal
  */
 public class GridMoveCommand extends AbstractPlayerCommand {
 
@@ -52,19 +53,11 @@ public class GridMoveCommand extends AbstractPlayerCommand {
 
         // BLOCK GM FROM USING THIS COMMAND
         if (DebugRoleWrapper.isGM(roleManager, playerRef)) {
-            // ERROR: GMs cannot use gridmove
             Message primary = Message.raw("GMs cannot use /gridmove!").color("#FF0000");
             Message secondary = Message.raw("Use /creature and /control instead").color("#FF6B6B");
             ItemWithAllMetadata icon = new ItemStack("Ingredient_Crystal_Red", 1).toPacket();
-
             NotificationUtil.sendNotification(
-                    playerRef.getPacketHandler(),
-                    primary,
-                    secondary,
-                    icon,
-                    NotificationStyle.Default
-            );
-
+                    playerRef.getPacketHandler(), primary, secondary, icon, NotificationStyle.Default);
             System.out.println("[GridMove] [WARN] GM " + playerRef.getUsername() + " attempted to use /gridmove");
             return;
         }
@@ -73,19 +66,16 @@ public class GridMoveCommand extends AbstractPlayerCommand {
 
         // Check if already active - DEACTIVATE
         if (state.npcEntity != null && state.npcEntity.isValid()) {
-            // INFO: Deactivating
             Message deactivatingPrimary = Message.raw("Deactivating...").color("#FFA500");
             ItemWithAllMetadata deactivatingIcon = new ItemStack("Ingredient_Crystal_Yellow", 1).toPacket();
-
             NotificationUtil.sendNotification(
-                    playerRef.getPacketHandler(),
-                    deactivatingPrimary,
-                    null,
-                    deactivatingIcon,
-                    NotificationStyle.Default
-            );
+                    playerRef.getPacketHandler(), deactivatingPrimary, null, deactivatingIcon, NotificationStyle.Default);
 
             world.execute(() -> {
+                // FIX 1: Clear any lingering freeze/spell state so the next /gridmove starts clean
+                state.unfreeze();
+                state.clearSpellCastingState();
+
                 // Remove grid overlay if active
                 if (state.gridOverlayEnabled) {
                     GridOverlayManager.removeGridOverlay(world, state);
@@ -94,17 +84,10 @@ public class GridMoveCommand extends AbstractPlayerCommand {
                 manager.clearDirectionHolograms(world, state);
                 PlayerEntityController.despawnPlayerNpc(world, state);
 
-                // SUCCESS: Deactivated
                 Message primary = Message.raw("Deactivated!").color("#FF6347");
                 ItemWithAllMetadata icon = new ItemStack("Ingredient_Crystal_Red", 1).toPacket();
-
                 NotificationUtil.sendNotification(
-                        playerRef.getPacketHandler(),
-                        primary,
-                        null,
-                        icon,
-                        NotificationStyle.Default
-                );
+                        playerRef.getPacketHandler(), primary, null, icon, NotificationStyle.Default);
 
                 System.out.println("[GridMove] [INFO] " + playerRef.getUsername() + " deactivated grid movement");
             });
@@ -114,17 +97,10 @@ public class GridMoveCommand extends AbstractPlayerCommand {
         // ACTIVATE - Get player position
         Vector3d playerPos = getPlayerPosition(ref, store);
         if (playerPos == null) {
-            // ERROR: Failed to get position
             Message primary = Message.raw("Failed to get your position!").color("#FF0000");
             ItemWithAllMetadata icon = new ItemStack("Ingredient_Crystal_Red", 1).toPacket();
-
             NotificationUtil.sendNotification(
-                    playerRef.getPacketHandler(),
-                    primary,
-                    null,
-                    icon,
-                    NotificationStyle.Default
-            );
+                    playerRef.getPacketHandler(), primary, null, icon, NotificationStyle.Default);
             return;
         }
 
@@ -135,38 +111,23 @@ public class GridMoveCommand extends AbstractPlayerCommand {
         // COLLISION CHECK
         if (collisionDetector.isPositionOccupied(gridX, gridZ, -1, playerRef.getUuid())) {
             String occupant = collisionDetector.getEntityNameAtPosition(gridX, gridZ);
-
-            // WARNING: Position occupied
             Message warningPrimary = Message.raw("Position occupied by: " + (occupant != null ? occupant : "entity")).color("#FFA500");
             ItemWithAllMetadata warningIcon = new ItemStack("Ingredient_Crystal_Yellow", 1).toPacket();
-
             NotificationUtil.sendNotification(
-                    playerRef.getPacketHandler(),
-                    warningPrimary,
-                    null,
-                    warningIcon,
-                    NotificationStyle.Default
-            );
+                    playerRef.getPacketHandler(), warningPrimary, null, warningIcon, NotificationStyle.Default);
 
             int[] freePos = collisionDetector.findNearestFreePosition(gridX, gridZ, 5);
             gridX = freePos[0];
             gridZ = freePos[1];
 
-            // INFO: Using alternate position
             Message infoPrimary = Message.raw("Spawning at nearest free position").color("#00BFFF");
             Message infoSecondary = Message.raw("Grid: (" + gridX + ", " + gridZ + ")").color("#FFFFFF");
             ItemWithAllMetadata infoIcon = new ItemStack("Ingredient_Crystal_Cyan", 1).toPacket();
-
             NotificationUtil.sendNotification(
-                    playerRef.getPacketHandler(),
-                    infoPrimary,
-                    infoSecondary,
-                    infoIcon,
-                    NotificationStyle.Default
-            );
+                    playerRef.getPacketHandler(), infoPrimary, infoSecondary, infoIcon, NotificationStyle.Default);
         }
 
-        // ── Crossbow check: not supported in grid combat — ask player to switch to shortbow ──
+        // Crossbow check: not supported in grid combat
         try {
             Player playerComp = store.getComponent(ref, Player.getComponentType());
             if (playerComp != null) {
@@ -185,7 +146,7 @@ public class GridMoveCommand extends AbstractPlayerCommand {
                     }
                 }
             }
-        } catch (Exception ignored) {} // if inventory unavailable, just continue
+        } catch (Exception ignored) {}
 
         state.currentGridX = gridX;
         state.currentGridZ = gridZ;
@@ -197,11 +158,14 @@ public class GridMoveCommand extends AbstractPlayerCommand {
         final Ref<EntityStore> playerEntityRef = ref;
 
         world.execute(() -> {
+            // FIX 1: Safety-net unfreeze so a /castfinal leftover never permanently locks the new NPC
+            state.unfreeze();
+            state.clearSpellCastingState();
+
             boolean success = PlayerEntityController.spawnPlayerNpc(
                     world, state, finalGridX, finalGridZ, playerPos.getY(), playerEntityRef);
 
             if (success) {
-                // Snapshot and broadcast equipment to all viewers (including late-joiners).
                 final GridPlayerState finalState = state;
                 java.util.concurrent.Executors.newSingleThreadScheduledExecutor().schedule(() ->
                                 world.execute(() -> PlayerEntityController.broadcastAndStoreEquipment(
@@ -217,34 +181,20 @@ public class GridMoveCommand extends AbstractPlayerCommand {
                     movesInfo = "Free movement (no limits)";
                 }
 
-                // SUCCESS: Grid movement enabled
                 Message primary = Message.raw("Grid Movement Enabled!").color("#00FFFF");
                 Message secondary = Message.raw("Grid: (" + finalGridX + ", " + finalGridZ + ") | " + movesInfo).color("#FFFFFF");
                 ItemWithAllMetadata icon = new ItemStack("Ingredient_Crystal_Cyan", 1).toPacket();
-
                 NotificationUtil.sendNotification(
-                        playerRef.getPacketHandler(),
-                        primary,
-                        secondary,
-                        icon,
-                        NotificationStyle.Default
-                );
+                        playerRef.getPacketHandler(), primary, secondary, icon, NotificationStyle.Default);
 
                 System.out.println("[GridMove] [INFO] " + playerRef.getUsername() +
                         " enabled grid movement at (" + finalGridX + ", " + finalGridZ + ")");
             } else {
-                // ERROR: Failed to spawn
                 Message primary = Message.raw("Failed to spawn player NPC!").color("#FF0000");
                 Message secondary = Message.raw("No ground found within 15 blocks below you!").color("#FF6B6B");
                 ItemWithAllMetadata icon = new ItemStack("Ingredient_Crystal_Red", 1).toPacket();
-
                 NotificationUtil.sendNotification(
-                        playerRef.getPacketHandler(),
-                        primary,
-                        secondary,
-                        icon,
-                        NotificationStyle.Default
-                );
+                        playerRef.getPacketHandler(), primary, secondary, icon, NotificationStyle.Default);
             }
         });
     }

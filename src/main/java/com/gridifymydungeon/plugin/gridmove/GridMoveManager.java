@@ -64,7 +64,7 @@ public class GridMoveManager {
     }
 
     public Set<Map.Entry<UUID, GridPlayerState>> getStateEntries() {
-        return playerStates.entrySet();
+        return (Set<Map.Entry<UUID, GridPlayerState>>) (Set<?>) playerStates.entrySet();
     }
 
     /**

@@ -134,6 +134,81 @@ public class SpellVisualManager {
         for (UUID id : new HashSet<>(playerSpellVisuals.keySet())) clearSpellVisuals(id, world);
     }
 
+// ========================================================
+// STACKED SPELL TILES (multi-target same cell)
+// ========================================================
+
+    /**
+     * Spawn an additional spell tile at the given cell, scaled down based on hit index.
+     * hitIndex 1 = scale 1.0, hitIndex 2 = 0.8, hitIndex 3 = 0.6, min 0.2
+     */
+    public void addStackedSpellTile(UUID playerUUID, SpellPatternCalculator.GridCell cell,
+                                    int hitIndex, World world, float refY) {
+        float scale = Math.max(0.2f, 1.0f - (hitIndex - 1) * 0.2f);
+        Model model = getSpellModelScaled(scale);
+        if (model == null) return;
+
+        float referenceY = resolveNpcY(playerUUID, refY);
+        Float groundY = MonsterEntityController.scanForGroundPublic(world, cell.x, cell.z, referenceY + 3.0f);
+        if (groundY == null) groundY = referenceY;
+
+        float cx = (cell.x * 2.0f) + 1.0f;
+        float cz = (cell.z * 2.0f) + 1.0f;
+        float y  = groundY + 0.03f + (hitIndex * 0.01f); // slightly higher per stack
+
+        Store<EntityStore> store = world.getEntityStore().getStore();
+        Ref<EntityStore> ref = spawnTile(store, model, cx, y, cz);
+        if (ref != null) {
+            playerSpellVisuals.computeIfAbsent(playerUUID, k -> new ArrayList<>()).add(ref);
+        }
+    }
+
+    private static Model getSpellModelScaled(float scale) {
+        try {
+            ModelAsset asset = ModelAsset.getAssetMap().getAsset(SPELL_MODEL_ID);
+            if (asset != null) return Model.createScaledModel(asset, scale);
+            asset = ModelAsset.getAssetMap().getAsset(FALLBACK_MODEL_ID);
+            if (asset != null) return Model.createScaledModel(asset, scale);
+        } catch (Exception e) {
+            System.err.println("[Griddify] [SPELL] Error loading scaled model: " + e.getMessage());
+        }
+        return null;
+    }
+
+// ========================================================
+// GROUND SCANNING (public static — used by SpellVisualEffect)
+// ========================================================
+
+    /**
+     * Scan downward from referenceY to find the ground surface Y at the given grid cell.
+     * Public static so SpellVisualEffect can call it directly.
+     */
+    public static Float scanForGround(World world, int gridX, int gridZ,
+                                      float referenceY, int scanDepth) {
+        try {
+            int startY = (int) Math.floor(referenceY);
+            int endY   = startY - scanDepth;
+            for (int blockY = startY; blockY >= endY; blockY--) {
+                boolean hasGround = false;
+                for (int xOff = 0; xOff < 2; xOff++) {
+                    for (int zOff = 0; zOff < 2; zOff++) {
+                        BlockType block = world.getBlockType(
+                                new com.hypixel.hytale.math.vector.Vector3i(
+                                        (gridX * 2) + xOff, blockY, (gridZ * 2) + zOff));
+                        if (block != null
+                                && block.getMaterial() == BlockMaterial.Solid
+                                && (block.getId() == null
+                                || !block.getId().toLowerCase().contains("barrier"))) {
+                            hasGround = true;
+                        }
+                    }
+                }
+                if (hasGround) return (float) blockY + 1.0f;
+            }
+        } catch (Exception ignored) {}
+        return null;
+    }
+
     // ========================================================
     // SPELL RANGE RING (Grid_Range, yellow)  FIX #1
     // ========================================================

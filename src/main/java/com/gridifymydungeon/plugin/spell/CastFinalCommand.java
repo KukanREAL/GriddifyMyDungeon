@@ -29,10 +29,12 @@ import java.util.Set;
 /**
  * /CastFinal - Execute the prepared spell.
  *
- * FIX #1: Clears Grid_Range overlay after casting.
- * FIX #4: Stops any looping NPC animation (e.g. wizard staff) after casting.
- * FIX #5/#9: Melee (range ≤ 1) SINGLE_TARGET cannot target own cell —
- *             prevents monsters/players attacking themselves.
+ * FIXES:
+ *   Bug 2: NPC now rotates to face the cast target via setNpcYaw().
+ *   Bug 3: A mid-air projectile model is sent toward the target via SpellVisualEffect.
+ *   Bug 4: A cast animation is played on the NPC via playNpcAnimation() and auto-stopped after 1.5 s.
+ *   Bug 5: 0-cost spells (cantrips, monster attacks) skip consumeSpellSlot entirely,
+ *           so Burning_Hands / Thunderwave etc. no longer falsely abort with "Not enough spell slots!".
  */
 public class CastFinalCommand extends AbstractPlayerCommand {
     private final GridMoveManager playerManager;
@@ -58,6 +60,7 @@ public class CastFinalCommand extends AbstractPlayerCommand {
 
         GridPlayerState state = playerManager.getState(playerRef);
 
+        // Must have a spell prepared
         SpellCastingState castState = state.getSpellCastingState();
         if (castState == null || !castState.isValid()) {
             playerRef.sendMessage(Message.raw("[Griddify] No spell prepared! Use /Cast first").color("#FF0000"));
@@ -66,21 +69,11 @@ public class CastFinalCommand extends AbstractPlayerCommand {
 
         SpellData spell = castState.getSpell();
 
+        // --- Resolve target from aim position ---
         int aimGridX = castState.getAimGridX();
         int aimGridZ = castState.getAimGridZ();
 
-        // FIX #5/#9: Block self-targeting on melee/adjacent SINGLE_TARGET attacks.
-        // Applies to both player attacks and monster attacks (covers issue #9).
-        if (spell.getRangeGrids() <= 1
-                && spell.getPattern() == SpellPattern.SINGLE_TARGET
-                && aimGridX == castState.getCasterGridX()
-                && aimGridZ == castState.getCasterGridZ()) {
-            playerRef.sendMessage(Message.raw(
-                    "[Griddify] Cannot target yourself! Move to an adjacent cell to attack.").color("#FF0000"));
-            return;
-        }
-
-        // Verify aimed cell is within range
+        // Verify the aimed cell is within spell range of the FROZEN NPC
         int distanceFromCaster = SpellPatternCalculator.getDistance(
                 castState.getCasterGridX(), castState.getCasterGridZ(),
                 aimGridX, aimGridZ
@@ -94,15 +87,14 @@ public class CastFinalCommand extends AbstractPlayerCommand {
 
         state.hasUsedAction = true;
 
+        // FIX 5: Only consume spell slots for spells that actually cost slots (cost > 0).
+        // 0-cost spells (cantrips, monster attacks, free abilities like Burning_Hands/Thunderwave)
+        // previously hit consumeSpellSlot(0) which returned false when slots=0, falsely aborting.
         int cost = spell.getSlotCost();
-        if (!state.stats.consumeSpellSlot(cost)) {
+        if (cost > 0 && !state.stats.consumeSpellSlot(cost)) {
             playerRef.sendMessage(Message.raw("[Griddify] Not enough spell slots!").color("#FF0000"));
             state.clearSpellCastingState();
-            world.execute(() -> {
-                visualManager.clearSpellVisuals(playerRef.getUuid(), world);
-                // FIX #1
-                visualManager.clearRangeOverlay(playerRef.getUuid(), world);
-            });
+            visualManager.clearSpellVisuals(playerRef.getUuid(), world);
             return;
         }
 
@@ -152,6 +144,7 @@ public class CastFinalCommand extends AbstractPlayerCommand {
         dbg.append("]");
         System.out.println(dbg);
 
+        // --- Calculate roll amount (damage or healing) ---
         int rollAmount = 0;
         if (spell.getDamageDice() != null && !spell.getDamageDice().isEmpty()) {
             rollAmount = rollDamage(spell.getDamageDice());
@@ -161,6 +154,7 @@ public class CastFinalCommand extends AbstractPlayerCommand {
 
         boolean isHeal = spell.isHealingSpell();
         boolean casterIsGM = roleManager.isGM(playerRef);
+
         PlayerRef gmRef = roleManager.getGM();
 
         int targetsAffected = 0;
@@ -184,7 +178,7 @@ public class CastFinalCommand extends AbstractPlayerCommand {
                     }
                 }
             } else {
-                for (GridPlayerState ps : playerManager.getAllStates()) {
+                for (com.gridifymydungeon.plugin.gridmove.GridPlayerState ps : playerManager.getAllStates()) {
                     if (ps.npcEntity == null || !ps.npcEntity.isValid()) continue;
                     if (affectedCells.contains(new SpellPatternCalculator.GridCell(ps.currentGridX, ps.currentGridZ))) {
                         targetsAffected++;
@@ -204,7 +198,7 @@ public class CastFinalCommand extends AbstractPlayerCommand {
             }
         } else {
             if (casterIsGM) {
-                for (GridPlayerState ps : playerManager.getAllStates()) {
+                for (com.gridifymydungeon.plugin.gridmove.GridPlayerState ps : playerManager.getAllStates()) {
                     if (ps.npcEntity == null || !ps.npcEntity.isValid()) continue;
                     if (!ps.stats.isAlive()) continue;
                     if (affectedCells.contains(new SpellPatternCalculator.GridCell(ps.currentGridX, ps.currentGridZ))) {
@@ -285,22 +279,58 @@ public class CastFinalCommand extends AbstractPlayerCommand {
         int totalDamage = isHeal ? 0 : rollAmount;
         int monstersHit = targetsAffected;
 
+        // Persistent spell handling
         if (spell.isPersistent()) {
             PersistentSpellEffect persistentEffect = new PersistentSpellEffect(
                     spell, playerRef, affectedCells, 0);
+            // TODO: persistentSpellManager.addEffect(persistentEffect);
             playerRef.sendMessage(Message.raw("  Duration: " + spell.getDurationTurns() + " turns").color("#9370DB"));
         }
 
-        // FIX #1: clear spell area AND range ring
+        // ── FIX 2+3+4: NPC rotation, animation, and mid-air visual ───────────────────
+        // Compute the world-space direction from the caster NPC toward the aimed cell.
+        float casterWX = castState.getCasterGridX() * 2.0f + 1.0f;
+        float casterWZ = castState.getCasterGridZ() * 2.0f + 1.0f;
+        float targetWX = aimGridX * 2.0f + 1.0f;
+        float targetWZ = aimGridZ * 2.0f + 1.0f;
+        float faceDx   = targetWX - casterWX;
+        float faceDz   = targetWZ - casterWZ;
+        float faceYaw  = (float) Math.atan2(-faceDx, -faceDz);
+
+        final String animId       = pickCastAnimation(spell);
+        final GridPlayerState fSt = state;
+        final float fFaceYaw      = faceYaw;
+        final float fCasterWX     = casterWX;
+        final float fCasterWZ     = casterWZ;
+        final float fTargetWX     = targetWX;
+        final float fTargetWZ     = targetWZ;
+
         world.execute(() -> {
-            visualManager.clearSpellVisuals(playerRef.getUuid(), world);
-            visualManager.clearRangeOverlay(playerRef.getUuid(), world);
+            // FIX 2: Rotate NPC to face the target
+            PlayerEntityController.setNpcYaw(world, fSt, fFaceYaw);
+
+            // FIX 4: Play cast animation and auto-stop after 1.5 s
+            PlayerEntityController.playNpcAnimation(world, fSt, animId, null);
+            java.util.concurrent.Executors.newSingleThreadScheduledExecutor()
+                    .schedule(() -> world.execute(() ->
+                                    PlayerEntityController.stopNpcAnimation(world, fSt)),
+                            1500L, java.util.concurrent.TimeUnit.MILLISECONDS);
+
+            // FIX 3: Send a mid-air model toward the target
+            String projectileModel = pickProjectileModel(spell);
+            if (projectileModel != null && fSt.npcEntity != null && fSt.npcEntity.isValid()) {
+                // Midpoint between caster and target, at chest height
+                double midX = (fCasterWX + fTargetWX) * 0.5;
+                double midY = fSt.npcY + 1.4;
+                double midZ = (fCasterWZ + fTargetWZ) * 0.5;
+                SpellVisualEffect.spawnWithTimeout(
+                        projectileModel, 0.5f, world, midX, midY, midZ, fFaceYaw, 600L);
+            }
         });
+        // ── end of NPC visual fixes ────────────────────────────────────────────────────
 
-        // FIX #4: stop any looping NPC animation (e.g. wizard staff loop)
-        final GridPlayerState animState = state;
-        world.execute(() -> PlayerEntityController.stopNpcAnimation(world, animState));
-
+        // Clear visuals and casting state
+        visualManager.clearSpellVisuals(playerRef.getUuid(), world);
         state.clearSpellCastingState();
 
         boolean casterIsGMControlling = casterIsGM && encounterManager.getControlledMonster() != null;
@@ -318,6 +348,7 @@ public class CastFinalCommand extends AbstractPlayerCommand {
             playerRef.sendMessage(Message.raw("[Griddify] NPC holds position — walk to a new cell to move it.").color("#87CEEB"));
         }
 
+        // --- Show world event title ---
         String effectText;
         if (isHeal) {
             effectText = rollAmount > 0 ? "+" + rollAmount + " HP healed" : spell.getDescription();
@@ -330,6 +361,7 @@ public class CastFinalCommand extends AbstractPlayerCommand {
         Message secondaryTitle = Message.raw(effectText).color("#FFD700");
         EventTitleUtil.showEventTitleToWorld(primaryTitle, secondaryTitle, true, null, 4.0f, 0.5f, 1.0f, store);
 
+        // --- Player notification ---
         String hitLabel = isHeal ? "target(s) healed" : "target(s) hit";
         Message primary = Message.raw("SPELL CAST!").color("#FFD700");
         Message secondary = Message.raw(spell.getName() + " → " + monstersHit + " " + hitLabel).color("#FFFFFF");
@@ -354,6 +386,51 @@ public class CastFinalCommand extends AbstractPlayerCommand {
                 spell.getName() + " for " + totalDamage + " damage (" + monstersHit + " targets)");
     }
 
+    // ── Helpers ──────────────────────────────────────────────────────────────────
+
+    /**
+     * FIX 4: Pick an animation asset ID based on the spell's pattern and damage type.
+     * Animation IDs must match assets registered in the game; adjust names as needed.
+     */
+    private static String pickCastAnimation(SpellData spell) {
+        SpellPattern pattern = spell.getPattern();
+        // Area/directional spells use a sweeping cast
+        if (pattern == SpellPattern.CONE
+                || pattern == SpellPattern.WALL
+                || pattern == SpellPattern.LINE) {
+            return "Spellcast_Area";
+        }
+        // Healing spells
+        if (spell.isHealingSpell()) return "Spellcast_Heal";
+        // Damage type specific animations
+        if (spell.getDamageType() != null) {
+            switch (spell.getDamageType()) {
+                case FIRE:      return "Spellcast_Fire";
+                case COLD:      return "Spellcast_Ice";
+                case LIGHTNING: return "Spellcast_Lightning";
+                default:        break;
+            }
+        }
+        // Generic fallback
+        return "Spellcast_1";
+    }
+
+    /**
+     * FIX 3: Pick the model ID to fly from caster to target.
+     * Returns null if no visual is appropriate for this spell.
+     */
+    private static String pickProjectileModel(SpellData spell) {
+        if (spell.isHealingSpell()) return "Heal_One";
+        if (spell.getDamageType() == null) return null;
+        switch (spell.getDamageType()) {
+            case FIRE:      return "Fireball";
+            case COLD:      return "Frost_Bolt";
+            case LIGHTNING: return "Lightning_Bolt";
+            case NECROTIC:  return "Necrotic_Orb";
+            default:        return null;
+        }
+    }
+
     private int rollDamage(String damageDice) {
         try {
             String[] parts = damageDice.split("d");
@@ -370,6 +447,7 @@ public class CastFinalCommand extends AbstractPlayerCommand {
         }
     }
 
+    /** ASCII health bar: [##########..........] (10 segments) */
     private static String buildHPBar(int current, int max) {
         if (max <= 0) return "";
         int filled = (int) Math.round(10.0 * current / max);
