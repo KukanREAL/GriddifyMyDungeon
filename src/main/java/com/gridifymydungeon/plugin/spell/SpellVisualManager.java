@@ -1,5 +1,6 @@
 package com.gridifymydungeon.plugin.spell;
 
+import com.gridifymydungeon.plugin.dnd.commands.MonsterEntityController;
 import com.gridifymydungeon.plugin.gridmove.GridMoveManager;
 import com.gridifymydungeon.plugin.gridmove.GridPlayerState;
 import com.hypixel.hytale.component.AddReason;
@@ -11,8 +12,6 @@ import com.hypixel.hytale.math.util.ChunkUtil;
 import com.hypixel.hytale.math.vector.Vector3d;
 import com.hypixel.hytale.math.vector.Vector3f;
 import com.hypixel.hytale.math.vector.Vector3i;
-import com.hypixel.hytale.protocol.BlockMaterial;
-import com.hypixel.hytale.server.core.asset.type.blocktype.config.BlockType;
 import com.hypixel.hytale.server.core.asset.type.model.config.Model;
 import com.hypixel.hytale.server.core.asset.type.model.config.ModelAsset;
 import com.hypixel.hytale.server.core.entity.UUIDComponent;
@@ -20,59 +19,85 @@ import com.hypixel.hytale.server.core.modules.entity.component.BoundingBox;
 import com.hypixel.hytale.server.core.modules.entity.component.ModelComponent;
 import com.hypixel.hytale.server.core.modules.entity.component.TransformComponent;
 import com.hypixel.hytale.server.core.modules.entity.tracker.NetworkId;
+import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.world.World;
 import com.hypixel.hytale.server.core.universe.world.chunk.ChunkColumn;
 import com.hypixel.hytale.server.core.universe.world.chunk.section.ChunkSection;
 import com.hypixel.hytale.server.core.universe.world.chunk.section.FluidSection;
 import com.hypixel.hytale.server.core.universe.world.storage.ChunkStore;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
+import com.hypixel.hytale.protocol.BlockMaterial;
+import com.hypixel.hytale.server.core.asset.type.blocktype.config.BlockType;
 
 import java.util.*;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 /**
- * Manages spell range/area visualization using Grid_Spell entities (red).
+ * Manages spell range/area visualization.
  *
- * Ground scanning now uses the same direct world.getBlockType() approach as
- * GridOverlayManager — scanning from referenceY+30 downward to handle terrain
- * up to 30 blocks above or below the caster correctly.
+ * Height priority (stacks over Grid_Basic and Grid_Player):
+ *   Grid_Range  +0.04  — yellow ring, private, shown during /cast
+ *   Grid_Spell  +0.05  — red area, private, shown when aiming
+ *
+ * FIX #1: showRangeOverlay() / clearRangeOverlay() added.
+ *   Tiles spawn at y=-30, teleport to ground+0.04, hide from non-owners after 150ms.
+ * FIX #3: Height offsets updated:  Grid_Spell +0.05, Grid_Range +0.04.
  */
 public class SpellVisualManager {
 
     private final GridMoveManager gridManager;
+
+    // Spell area (red, Grid_Spell)
     private final Map<UUID, List<Ref<EntityStore>>> playerSpellVisuals = new HashMap<>();
 
+    // Spell range ring (yellow, Grid_Range)  FIX #1
+    private final Map<UUID, List<Ref<EntityStore>>> playerRangeVisuals = new HashMap<>();
+
     private static final String SPELL_MODEL_ID    = "Grid_Spell";
-    private static final String FALLBACK_MODEL_ID = "Grid_Basic";
     private static final String RANGE_MODEL_ID    = "Grid_Range";
+    private static final String FALLBACK_MODEL_ID = "Grid_Basic";
 
     private static Model cachedSpellModel     = null;
     private static Model cachedRangeModel     = null;
     private static boolean modelLoadAttempted = false;
-    private static boolean rangeModelAttempted = false;
 
-    // Per-player range overlay tiles (separate from the aim overlay)
-    private final Map<UUID, List<Ref<EntityStore>>> playerRangeVisuals = new HashMap<>();
+    // FIX #3 — height offsets
+    private static final float SPELL_Y_OFFSET = 0.05f;  // Grid_Spell: highest
+    private static final float RANGE_Y_OFFSET = 0.04f;  // Grid_Range: below spell
+
+    // Scheduler for hide-from-others delay  FIX #1
+    private static final ScheduledExecutorService SCHED =
+            Executors.newSingleThreadScheduledExecutor(r -> {
+                Thread t = new Thread(r, "spell-visual-hider");
+                t.setDaemon(true);
+                return t;
+            });
 
     public SpellVisualManager(GridMoveManager gridManager) {
         this.gridManager = gridManager;
     }
 
     // ========================================================
-    // PUBLIC API
+    // SPELL AREA (Grid_Spell, red)
     // ========================================================
 
+    /**
+     * Show spell impact area in red.
+     * FIX #3: Uses SPELL_Y_OFFSET (+0.05) so it renders above Grid_Range.
+     */
     public void showSpellArea(UUID playerUUID, Set<SpellPatternCalculator.GridCell> cells,
                               World world, float playerY) {
         clearSpellVisuals(playerUUID, world);
 
-        Model model = getSpellModel();
+        Model model = getModel(SPELL_MODEL_ID);
         if (model == null) {
             System.err.println("[Griddify] [SPELL] Failed to load spell model!");
             return;
         }
 
         float referenceY = resolveNpcY(playerUUID, playerY);
-
         List<Ref<EntityStore>> newVisuals = new ArrayList<>();
         Store<EntityStore> store = world.getEntityStore().getStore();
 
@@ -80,13 +105,10 @@ public class SpellVisualManager {
             float cx = (cell.x * 2.0f) + 1.0f;
             float cz = (cell.z * 2.0f) + 1.0f;
 
-            // Use the same scanForGround approach as GridOverlayManager:
-            // start 30 blocks ABOVE referenceY and scan down 45 blocks total,
-            // so both uphill and downhill cells are found correctly.
-            Float groundY = scanForGround(world, cell.x, cell.z, referenceY + 30.0f, 45);
+            Float groundY = MonsterEntityController.scanForGroundPublic(world, cell.x, cell.z, referenceY + 3.0f);
             if (groundY == null) groundY = referenceY;
 
-            float y = groundY + 0.06f;  // Raised above Grid_Player/Grid_Difficult (0.01f)
+            float y = groundY + SPELL_Y_OFFSET; // FIX #3
             Ref<EntityStore> ref = spawnTile(store, model, cx, y, cz);
             if (ref != null) newVisuals.add(ref);
         }
@@ -94,102 +116,6 @@ public class SpellVisualManager {
         playerSpellVisuals.put(playerUUID, newVisuals);
         System.out.println("[Griddify] [SPELL] Spell overlay: " + cells.size() +
                 " cells → " + newVisuals.size() + " placed");
-    }
-
-
-    /**
-     * Spawn one additional scaled Grid_Spell tile for a stacked /CastTarget on the same cell.
-     * hitCount = how many times this cell has been confirmed total (1 = first hit = scale 1.0,
-     * 2 = second hit = scale 0.8, 3 = 0.6, etc.).
-     * Does NOT clear existing visuals — just appends the new entity.
-     * Must be called inside world.execute().
-     */
-    public void addStackedSpellTile(UUID playerUUID, SpellPatternCalculator.GridCell cell,
-                                    int hitCount, World world, float referenceY) {
-        float scale = Math.max(0.2f, 1.0f - (hitCount - 1) * 0.2f);
-        ModelAsset asset;
-        try {
-            asset = ModelAsset.getAssetMap().getAsset(SPELL_MODEL_ID);
-            if (asset == null) return;
-        } catch (Exception e) { return; }
-        Model scaled = Model.createScaledModel(asset, scale);
-
-        float cx = (cell.x * 2.0f) + 1.0f;
-        float cz = (cell.z * 2.0f) + 1.0f;
-        Float groundY = scanForGround(world, cell.x, cell.z, referenceY + 30f, 45);
-        float y = (groundY != null ? groundY : referenceY) + 0.03f + (hitCount - 1) * 0.01f;
-
-        Store<EntityStore> store = world.getEntityStore().getStore();
-        Ref<EntityStore> ref = spawnTile(store, scaled, cx, y, cz);
-        if (ref != null) {
-            playerSpellVisuals.computeIfAbsent(playerUUID, k -> new ArrayList<>()).add(ref);
-        }
-    }
-
-    /**
-     * Heal visual for SINGLE-TARGET heals:
-     * Spawn Heal_One particle effect at the healed creature's world position for 3 seconds.
-     * Must be called inside world.execute().
-     */
-    public static void spawnHealOne(World world, float wx, float wy, float wz) {
-        spawnTimedEntity("Heal_One", 1.0f, world, wx, wy, wz, 3000L);
-    }
-
-    /**
-     * Heal visual for AREA heals:
-     * Spawn Heal_Circle under the caster + Heal_One at every affected creature position.
-     * Must be called inside world.execute().
-     */
-    public static void spawnHealArea(World world,
-                                     float casterWx, float casterWy, float casterWz,
-                                     java.util.List<float[]> targetPositions) {
-        spawnTimedEntity("Heal_Circle", 1.5f, world, casterWx, casterWy, casterWz, 3000L);
-        for (float[] pos : targetPositions) {
-            spawnTimedEntity("Heal_One", 1.0f, world, pos[0], pos[1], pos[2], 3000L);
-        }
-    }
-
-    /**
-     * Spawn a model entity and despawn it after {@code lifetimeMs} milliseconds.
-     * Self-contained — no dependency on SpellVisualEffect.
-     */
-    private static void spawnTimedEntity(String modelId, float scale,
-                                         World world, float x, float y, float z,
-                                         long lifetimeMs) {
-        try {
-            ModelAsset asset = ModelAsset.getAssetMap().getAsset(modelId);
-            if (asset == null) {
-                System.err.println("[Griddify] [HEAL] Model not found: " + modelId);
-                return;
-            }
-            Model model = Model.createScaledModel(asset, scale);
-            Store<EntityStore> store = world.getEntityStore().getStore();
-            Ref<EntityStore> ref = new com.hypixel.hytale.component.Ref<>(store);
-            Holder<EntityStore> holder = EntityStore.REGISTRY.newHolder();
-            holder.addComponent(TransformComponent.getComponentType(),
-                    new TransformComponent(new Vector3d(x, y, z), new Vector3f(0, 0, 0)));
-            holder.addComponent(ModelComponent.getComponentType(), new ModelComponent(model));
-            holder.addComponent(BoundingBox.getComponentType(), new BoundingBox(model.getBoundingBox()));
-            holder.addComponent(NetworkId.getComponentType(),
-                    new NetworkId(store.getExternalData().takeNextNetworkId()));
-            holder.ensureComponent(com.hypixel.hytale.server.core.entity.UUIDComponent.getComponentType());
-            Ref<EntityStore> spawnedRef = store.addEntity(holder, AddReason.SPAWN);
-            if (spawnedRef != null) {
-                final Ref<EntityStore> fr = spawnedRef;
-                new Thread(() -> {
-                    try {
-                        Thread.sleep(lifetimeMs);
-                        world.execute(() -> {
-                            try {
-                                if (fr.isValid()) store.removeEntity(fr, RemoveReason.REMOVE);
-                            } catch (Exception ignored) {}
-                        });
-                    } catch (InterruptedException ignored) {}
-                }, "HealVisual-Despawn").start();
-            }
-        } catch (Exception e) {
-            System.err.println("[Griddify] [HEAL] spawnTimedEntity failed: " + e.getMessage());
-        }
     }
 
     public void clearSpellVisuals(UUID playerUUID, World world) {
@@ -208,15 +134,21 @@ public class SpellVisualManager {
         for (UUID id : new HashSet<>(playerSpellVisuals.keySet())) clearSpellVisuals(id, world);
     }
 
+    // ========================================================
+    // SPELL RANGE RING (Grid_Range, yellow)  FIX #1
+    // ========================================================
+
     /**
-     * Shows a ring of Grid_Range tiles covering every cell within the spell's
-     * range from the caster's grid position. Called on /cast so the player can
-     * see exactly how far the spell reaches before aiming.
-     * SELF/AURA spells with range 0 skip the overlay (they fire on the caster).
+     * FIX #1: Show spell reach ring (Grid_Range) visible only to the owning player.
+     * Tiles spawn at y=-30, teleport to ground+0.04, hide from non-owners after 150ms.
+     *
+     * @param rangeGrids 0 = skip (SELF/AURA instant cast)
+     * @param owner      PlayerRef of the caster — used for privacy filter
      */
     public void showRangeOverlay(UUID playerUUID, int casterGridX, int casterGridZ,
-                                 int rangeGrids, World world, float npcY) {
+                                 int rangeGrids, World world, float npcY, PlayerRef owner) {
         clearRangeOverlay(playerUUID, world);
+
         if (rangeGrids <= 0) return;
 
         Model model = getRangeModel();
@@ -225,92 +157,108 @@ public class SpellVisualManager {
             return;
         }
 
-        float referenceY = resolveNpcY(playerUUID, npcY);
-        List<Ref<EntityStore>> tiles = new ArrayList<>();
         Store<EntityStore> store = world.getEntityStore().getStore();
+        List<Ref<EntityStore>> refs = new ArrayList<>();
 
-        // All cells with Euclidean distance <= rangeGrids from caster
+        // Ring of cells at exactly rangeGrids Chebyshev distance
         for (int dx = -rangeGrids; dx <= rangeGrids; dx++) {
             for (int dz = -rangeGrids; dz <= rangeGrids; dz++) {
-                double dist = Math.sqrt(dx * dx + dz * dz);
-                if (dist > rangeGrids) continue;
+                int chebyshev = Math.max(Math.abs(dx), Math.abs(dz));
+                if (chebyshev != rangeGrids) continue; // only the outer ring
 
-                int cellX = casterGridX + dx;
-                int cellZ = casterGridZ + dz;
+                int gx = casterGridX + dx;
+                int gz = casterGridZ + dz;
 
-                float wx = (cellX * 2.0f) + 1.0f;
-                float wz = (cellZ * 2.0f) + 1.0f;
+                float cx = (gx * 2.0f) + 1.0f;
+                float cz2 = (gz * 2.0f) + 1.0f;
 
-                Float groundY = scanForGround(world, cellX, cellZ, referenceY + 30.0f, 45);
-                if (groundY == null) groundY = referenceY;
+                Float groundY = MonsterEntityController.scanForGroundPublic(world, gx, gz, npcY + 3.0f);
+                if (groundY == null) groundY = npcY;
 
-                Ref<EntityStore> ref = spawnTile(store, model, wx, groundY + 0.005f, wz); // lowest layer: below Grid_Player(0.02) Grid_Difficult(0.02) Grid_Spell(0.06)
-                if (ref != null) tiles.add(ref);
+                float targetY = groundY + RANGE_Y_OFFSET; // FIX #3
+
+                // FIX #1: Spawn at y=-30 (invisible to all), then teleport to real Y
+                Ref<EntityStore> ref = spawnTile(store, model, cx, -30f, cz2);
+                if (ref == null) continue;
+
+                // Teleport to real position
+                try {
+                    TransformComponent tc = store.getComponent(ref, TransformComponent.getComponentType());
+                    if (tc != null) tc.setPosition(new Vector3d(cx, targetY, cz2));
+                } catch (Exception ignored) {}
+
+                refs.add(ref);
             }
         }
 
-        playerRangeVisuals.put(playerUUID, tiles);
-        System.out.println("[Griddify] [RANGE] Range overlay: range=" + rangeGrids
-                + " cells=" + tiles.size() + " for " + playerUUID);
+        playerRangeVisuals.put(playerUUID, refs);
+
+        // FIX #1: Hide from non-owners after entity-tracker has had time to broadcast
+        if (owner != null) {
+            final List<Ref<EntityStore>> finalRefs = refs;
+            final PlayerRef finalOwner = owner;
+            SCHED.schedule(() -> world.execute(() ->
+                    hideRefsFromOthers(world, finalRefs, finalOwner)
+            ), 150L, TimeUnit.MILLISECONDS);
+        }
+
+        System.out.println("[Griddify] [RANGE] Range ring: " + refs.size() + " tiles at radius " + rangeGrids);
     }
 
+    /** Legacy overload without owner (range ring visible to all — use sparingly). */
+    public void showRangeOverlay(UUID playerUUID, int casterGridX, int casterGridZ,
+                                 int rangeGrids, World world, float npcY) {
+        showRangeOverlay(playerUUID, casterGridX, casterGridZ, rangeGrids, world, npcY, null);
+    }
+
+    /** FIX #1: Clear the Grid_Range ring. Call at /castfinal and /castcancel. */
     public void clearRangeOverlay(UUID playerUUID, World world) {
-        List<Ref<EntityStore>> tiles = playerRangeVisuals.remove(playerUUID);
-        if (tiles == null) return;
+        List<Ref<EntityStore>> refs = playerRangeVisuals.remove(playerUUID);
+        if (refs == null) return;
         Store<EntityStore> store = world.getEntityStore().getStore();
-        for (Ref<EntityStore> ref : tiles) {
+        for (Ref<EntityStore> ref : refs) {
             if (ref != null && ref.isValid()) {
                 try { store.removeEntity(ref, RemoveReason.REMOVE); } catch (Exception ignored) {}
             }
         }
-        tiles.clear();
+        refs.clear();
     }
 
-    public void clearAllRangeOverlays(World world) {
+    public void clearAllRangeVisuals(World world) {
         for (UUID id : new HashSet<>(playerRangeVisuals.keySet())) clearRangeOverlay(id, world);
     }
 
     // ========================================================
-    // GROUND SCANNING — identical logic to GridOverlayManager
+    // HIDE FROM OTHERS  FIX #1
     // ========================================================
 
     /**
-     * Scans downward from referenceY for the first solid non-barrier block.
-     * Returns groundY = blockY + 1.0f (top surface of that block).
-     * Identical to GridOverlayManager.scanForGround — this is what actually works.
+     * Send EntityUpdates(removed) for each ref to every player EXCEPT the owner.
      */
-    public static Float scanForGround(World world, int gridX, int gridZ, float referenceY, int scanDepth) {
-        int startY = (int) Math.floor(referenceY);
-        int endY   = startY - scanDepth;
-        for (int blockY = startY; blockY >= endY; blockY--) {
-            boolean hasGround = false;
-            for (int xOff = 0; xOff < 2; xOff++) {
-                for (int zOff = 0; zOff < 2; zOff++) {
-                    BlockType block = world.getBlockType(
-                            new Vector3i((gridX * 2) + xOff, blockY, (gridZ * 2) + zOff));
-                    if (isSolid(block) && !isBarrier(block)) {
-                        hasGround = true;
-                    }
-                }
-            }
-            if (hasGround) {
-                return blockY + 1.0f;
-            }
+    private static void hideRefsFromOthers(World world, List<Ref<EntityStore>> refs, PlayerRef owner) {
+        Store<EntityStore> store = world.getEntityStore().getStore();
+        for (Ref<EntityStore> ref : refs) {
+            if (ref == null || !ref.isValid()) continue;
+            try {
+                NetworkId netIdComp = store.getComponent(ref, NetworkId.getComponentType());
+                if (netIdComp == null) continue;
+                int netId = netIdComp.getId();
+                com.hypixel.hytale.server.core.universe.world.PlayerUtil.forEachPlayerThatCanSeeEntity(
+                        ref,
+                        (pRef, pRefComponent, ca) -> {
+                            if (!pRefComponent.getUuid().equals(owner.getUuid())) {
+                                pRefComponent.getPacketHandler().writeNoCache(
+                                        new com.hypixel.hytale.protocol.packets.entities.EntityUpdates(
+                                                new int[]{netId}, null));
+                            }
+                        },
+                        store);
+            } catch (Exception ignored) {}
         }
-        return null;
-    }
-
-    private static boolean isSolid(BlockType block) {
-        return block != null && block.getMaterial() == BlockMaterial.Solid;
-    }
-
-    private static boolean isBarrier(BlockType block) {
-        return block != null && block.getId() != null &&
-                block.getId().toLowerCase().contains("barrier");
     }
 
     // ========================================================
-    // Y REFERENCE
+    // Y REFERENCE — always use NPC ground Y, not player body Y
     // ========================================================
 
     private float resolveNpcY(UUID playerUUID, float fallbackY) {
@@ -325,25 +273,31 @@ public class SpellVisualManager {
     }
 
     // ========================================================
-    // FLUID DETECTION
+    // FLUID SURFACE DETECTION
     // ========================================================
 
-    private static boolean hasFluidAbove(World world, int gridX, int gridZ, float groundY) {
+    private static Float findFluidSurfaceY(World world, int gridX, int gridZ, float referenceY) {
         try {
-            Store<ChunkStore> cs = world.getChunkStore().getStore();
-            int startY = (int) Math.floor(groundY);
-            int endY   = (int) Math.floor(groundY + 2.0f);
-            for (int y = startY; y <= endY; y++) {
-                for (int xOff = 0; xOff < 2; xOff++) {
-                    for (int zOff = 0; zOff < 2; zOff++) {
-                        int bx = (gridX * 2) + xOff, bz = (gridZ * 2) + zOff;
-                        FluidSection fluid = findFluidSection(world, cs, bx, y, bz);
-                        if (fluid != null && fluid.getFluidId(bx, y, bz) != 0) return true;
+            Store<ChunkStore> chunkStore = world.getChunkStore().getStore();
+            int startY = (int) Math.floor(referenceY - 3);
+            int endY   = (int) Math.floor(referenceY - 15);
+
+            for (int checkY = startY; checkY >= endY; checkY--) {
+                boolean hasFluid = false;
+                for (int xOff = 0; xOff < 2 && !hasFluid; xOff++) {
+                    for (int zOff = 0; zOff < 2 && !hasFluid; zOff++) {
+                        int bx = (gridX * 2) + xOff;
+                        int bz = (gridZ * 2) + zOff;
+                        FluidSection fs = findFluidSection(world, chunkStore, bx, checkY, bz);
+                        if (fs != null && fs.getFluidId(bx, checkY, bz) != 0) {
+                            hasFluid = true;
+                        }
                     }
                 }
+                if (hasFluid) return (float) checkY + 1.0f;
             }
         } catch (Exception ignored) {}
-        return false;
+        return null;
     }
 
     private static FluidSection findFluidSection(World world, Store<ChunkStore> store,
@@ -391,22 +345,23 @@ public class SpellVisualManager {
     // MODEL LOADING
     // ========================================================
 
-    private static Model getSpellModel() {
-        if (cachedSpellModel != null) return cachedSpellModel;
-        if (modelLoadAttempted) return null;
-        modelLoadAttempted = true;
-        cachedSpellModel = loadModel(SPELL_MODEL_ID);
-        if (cachedSpellModel == null) cachedSpellModel = loadModel(FALLBACK_MODEL_ID);
-        return cachedSpellModel;
+    private static Model getModel(String id) {
+        if (!modelLoadAttempted) initModels();
+        if (SPELL_MODEL_ID.equals(id)) return cachedSpellModel;
+        return cachedSpellModel; // fallback
     }
 
     private static Model getRangeModel() {
-        if (cachedRangeModel != null) return cachedRangeModel;
-        if (rangeModelAttempted) return null;
-        rangeModelAttempted = true;
+        if (!modelLoadAttempted) initModels();
+        return cachedRangeModel != null ? cachedRangeModel : cachedSpellModel;
+    }
+
+    private static void initModels() {
+        modelLoadAttempted = true;
+        cachedSpellModel = loadModel(SPELL_MODEL_ID);
         cachedRangeModel = loadModel(RANGE_MODEL_ID);
-        if (cachedRangeModel == null) cachedRangeModel = loadModel(FALLBACK_MODEL_ID);
-        return cachedRangeModel;
+        if (cachedSpellModel == null) cachedSpellModel = loadModel(FALLBACK_MODEL_ID);
+        if (cachedRangeModel == null) cachedRangeModel = cachedSpellModel;
     }
 
     private static Model loadModel(String id) {

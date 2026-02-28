@@ -23,9 +23,12 @@ import com.hypixel.hytale.server.core.util.NotificationUtil;
 import javax.annotation.Nonnull;
 
 /**
- * /control <number> - GM controls a monster
- * /control 0 - Stop controlling
- * FIXED: getState() takes PlayerRef, not PacketHandler
+ * /control <number> - GM controls a monster.
+ * /control 0       - Stop controlling.
+ *
+ * FIX #8: /Grid (gmMapOverlayActive=true) must NEVER be removed when the GM
+ * switches monsters via /control. Only BFS overlays (monster/player range tiles)
+ * are cleaned up. The static /grid map stays until the GM types /grid again.
  */
 public class ControlCommand extends AbstractPlayerCommand {
 
@@ -51,19 +54,10 @@ public class ControlCommand extends AbstractPlayerCommand {
             @Nonnull PlayerRef playerRef,
             @Nonnull World world
     ) {
-        // Check if player is GM
         if (!roleManager.isGM(playerRef)) {
-            // ERROR: Not GM
             Message primary = Message.raw("Only the GM can use this command!").color("#FF0000");
             ItemWithAllMetadata icon = new ItemStack("Ingredient_Crystal_Red", 1).toPacket();
-
-            NotificationUtil.sendNotification(
-                    playerRef.getPacketHandler(),
-                    primary,
-                    null,
-                    icon,
-                    NotificationStyle.Default
-            );
+            NotificationUtil.sendNotification(playerRef.getPacketHandler(), primary, null, icon, NotificationStyle.Default);
             return;
         }
 
@@ -74,43 +68,24 @@ public class ControlCommand extends AbstractPlayerCommand {
             MonsterState currentMonster = encounterManager.getControlledMonster();
 
             if (currentMonster == null) {
-                // WARNING: Not controlling any monster
                 Message primary = Message.raw("You are not controlling any monster!").color("#FFA500");
                 ItemWithAllMetadata icon = new ItemStack("Ingredient_Crystal_Yellow", 1).toPacket();
-
-                NotificationUtil.sendNotification(
-                        playerRef.getPacketHandler(),
-                        primary,
-                        null,
-                        icon,
-                        NotificationStyle.Default
-                );
+                NotificationUtil.sendNotification(playerRef.getPacketHandler(), primary, null, icon, NotificationStyle.Default);
                 return;
             }
 
             world.execute(() -> {
                 String monsterName = currentMonster.getDisplayName();
 
-                // Clean up grid overlay if active
-                cleanUpGMGridOverlay(playerRef, world);
+                // FIX #8: Only remove BFS overlay, preserve /grid map
+                cleanUpGMBFSOverlay(playerRef, world);
 
-                // Update hologram back to just number
                 MonsterEntityController.updateHologramText(world, currentMonster, String.valueOf(currentMonster.monsterNumber));
-
-                // Stop control
                 encounterManager.stopControl();
 
-                // INFO: Stopped controlling
                 Message primary = Message.raw("Stopped controlling " + monsterName).color("#00BFFF");
                 ItemWithAllMetadata icon = new ItemStack("Ingredient_Crystal_Cyan", 1).toPacket();
-
-                NotificationUtil.sendNotification(
-                        playerRef.getPacketHandler(),
-                        primary,
-                        null,
-                        icon,
-                        NotificationStyle.Default
-                );
+                NotificationUtil.sendNotification(playerRef.getPacketHandler(), primary, null, icon, NotificationStyle.Default);
 
                 System.out.println("[Griddify] [CONTROL] GM stopped controlling " + monsterName);
             });
@@ -121,94 +96,71 @@ public class ControlCommand extends AbstractPlayerCommand {
         MonsterState monster = encounterManager.getMonsterByNumber(monsterNumber);
 
         if (monster == null) {
-            // ERROR: Monster not found
             Message primary = Message.raw("Monster #" + monsterNumber + " not found!").color("#FF0000");
             ItemWithAllMetadata icon = new ItemStack("Ingredient_Crystal_Red", 1).toPacket();
-
-            NotificationUtil.sendNotification(
-                    playerRef.getPacketHandler(),
-                    primary,
-                    null,
-                    icon,
-                    NotificationStyle.Default
-            );
+            NotificationUtil.sendNotification(playerRef.getPacketHandler(), primary, null, icon, NotificationStyle.Default);
             return;
         }
 
         world.execute(() -> {
-            // Release previous control if any
             MonsterState previousMonster = encounterManager.getControlledMonster();
             if (previousMonster != null) {
-                // Restore previous monster's hologram to just the number
                 MonsterEntityController.updateHologramText(world, previousMonster, String.valueOf(previousMonster.monsterNumber));
             }
 
-            // Clean up grid overlay when switching monsters
-            cleanUpGMGridOverlay(playerRef, world);
+            // FIX #8: Only remove BFS overlay, preserve /grid map
+            cleanUpGMBFSOverlay(playerRef, world);
 
-            // Set controlled
             boolean success = encounterManager.setControlled(monsterNumber);
 
             if (success) {
-                // Update hologram to show "Moving X"
                 MonsterEntityController.updateHologramText(world, monster, "Moving " + monster.monsterNumber);
 
-                String movesText = (int)monster.remainingMoves + "/" + (int)monster.maxMoves;
+                String movesText = (int) monster.remainingMoves + "/" + (int) monster.maxMoves;
 
-                // SUCCESS: Now controlling
                 Message primary = Message.raw("Now controlling: " + monster.getDisplayName()).color("#00FFFF");
                 Message secondary = Message.raw("Moves: " + movesText).color("#FFFFFF");
                 ItemWithAllMetadata icon = new ItemStack("Ingredient_Crystal_Cyan", 1).toPacket();
-
-                NotificationUtil.sendNotification(
-                        playerRef.getPacketHandler(),
-                        primary,
-                        secondary,
-                        icon,
-                        NotificationStyle.Default
-                );
+                NotificationUtil.sendNotification(playerRef.getPacketHandler(), primary, secondary, icon, NotificationStyle.Default);
 
                 System.out.println("[Griddify] [CONTROL] GM controlling " + monster.getDisplayName() +
                         " (moves: " + monster.remainingMoves + "/" + monster.maxMoves + ")");
             } else {
-                // ERROR: Failed to control
                 Message primary = Message.raw("Failed to control monster #" + monsterNumber).color("#FF0000");
                 ItemWithAllMetadata icon = new ItemStack("Ingredient_Crystal_Red", 1).toPacket();
-
-                NotificationUtil.sendNotification(
-                        playerRef.getPacketHandler(),
-                        primary,
-                        null,
-                        icon,
-                        NotificationStyle.Default
-                );
+                NotificationUtil.sendNotification(playerRef.getPacketHandler(), primary, null, icon, NotificationStyle.Default);
             }
         });
     }
 
     /**
-     * Remove grid overlay from GM's state if enabled.
-     * CORRECT: getState() takes PlayerRef
+     * FIX #8: Remove only BFS overlays (monster/player range tiles).
+     * If the GM has /grid active (gmMapOverlayActive == true), that static map
+     * is NEVER touched — it persists until the GM types /grid again.
      */
-    private void cleanUpGMGridOverlay(PlayerRef playerRef, World world) {
-        // getState() takes PlayerRef directly
+    private void cleanUpGMBFSOverlay(PlayerRef playerRef, World world) {
         GridPlayerState gmState = gridMoveManager.getState(playerRef);
+        if (gmState == null) return;
 
-        if (gmState != null && gmState.gridOverlayEnabled) {
-            // Clean up grid overlay entities
+        // FIX #8: Static /grid map — never remove it here
+        if (gmState.gmMapOverlayActive) {
+            System.out.println("[Control] /grid map preserved (gmMapOverlayActive=true)");
+            return;
+        }
+
+        // Only remove BFS range overlay
+        if (gmState.gridOverlayEnabled) {
             Store<EntityStore> entityStore = world.getEntityStore().getStore();
             for (com.hypixel.hytale.component.Ref<EntityStore> gridEntity : gmState.gridOverlay) {
                 if (gridEntity != null && gridEntity.isValid()) {
                     try {
                         entityStore.removeEntity(gridEntity, com.hypixel.hytale.component.RemoveReason.REMOVE);
-                    } catch (Exception e) {
-                        // Silently ignore
-                    }
+                    } catch (Exception ignored) {}
                 }
             }
             gmState.gridOverlay.clear();
             gmState.gridOverlayEnabled = false;
-            System.out.println("[Control] Cleaned up GM grid overlay");
+            System.out.println("[Control] Cleaned up GM BFS overlay");
         }
     }
 }

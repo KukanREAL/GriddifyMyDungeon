@@ -7,6 +7,9 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import com.hypixel.hytale.component.Holder;
 import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.component.RemoveReason;
@@ -20,10 +23,14 @@ import com.hypixel.hytale.server.core.modules.entity.tracker.NetworkId;
 import com.hypixel.hytale.server.core.universe.world.World;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import com.gridifymydungeon.plugin.gridmove.commands.GridMoveCommand;
+import com.gridifymydungeon.plugin.dnd.PlayerEntityController;
 
 /**
- * Manages NPC-Player links for grid-based movement
- * FIXED v4: Store PlayerRef in state for easy access by commands
+ * Manages NPC-Player links for grid-based movement.
+ *
+ * FIX #7: Direction holograms (WASD indicators) now spawn at y=-30, teleport to
+ *         real Y, then hide from non-owners after 150ms. Only the owning player
+ *         can see the WASD direction indicators above their own NPC.
  */
 public class GridMoveManager {
 
@@ -32,71 +39,81 @@ public class GridMoveManager {
     /** Whether fog-of-war is currently active (toggled by GM via /FogOfWar). */
     private volatile boolean fogOfWarActive = false;
 
+    // FIX #7: Scheduler for hiding holograms from non-owners
+    private static final ScheduledExecutorService HOLOGRAM_SCHED =
+            Executors.newSingleThreadScheduledExecutor(r -> {
+                Thread t = new Thread(r, "hologram-hider");
+                t.setDaemon(true);
+                return t;
+            });
+
     public boolean isFogOfWarActive() { return fogOfWarActive; }
     public void setFogOfWarActive(boolean v) { fogOfWarActive = v; }
 
     /**
-     * Get or create state for a player
-     * UPDATED: Now stores PlayerRef in the state for later retrieval
+     * Get or create state for a player.
      */
     public GridPlayerState getState(PlayerRef playerRef) {
         GridPlayerState state = playerStates.computeIfAbsent(playerRef.getUuid(), k -> new GridPlayerState());
-        // Always update the PlayerRef reference (in case it changed or this is first access)
         state.playerRef = playerRef;
         return state;
     }
 
-    /**
-     * Get PlayerRef for a given GridPlayerState
-     * Used by LevelUp/LevelDown commands to notify players
-     * ADDED: Relies on PlayerRef being stored in GridPlayerState
-     */
     public PlayerRef getPlayerRefByState(GridPlayerState state) {
-        // Simply return the stored PlayerRef (will be null if state was created outside of getState())
         return state.playerRef;
     }
 
-    /**
-     * Get all state entries with UUIDs (for CollisionDetector to check player positions)
-     */
     public Set<Map.Entry<UUID, GridPlayerState>> getStateEntries() {
         return playerStates.entrySet();
     }
 
+    /**
+     * FIX #7: Spawn WASD holograms private to the owning player.
+     * Each hologram spawns at y=-30 (below world, no broadcast), teleports to real Y,
+     * then gets hidden from all non-owners after 150ms.
+     */
     public void spawnDirectionHolograms(World world, GridPlayerState state) {
-        if (state.npcEntity == null || !state.npcEntity.isValid()) {
-            return;
-        }
+        if (state.npcEntity == null || !state.npcEntity.isValid()) return;
 
         try {
             float centerX = (state.currentGridX * 2.0f) + 1.0f;
             float centerZ = (state.currentGridZ * 2.0f) + 1.0f;
             float y = state.npcY + 3.0f;
+            float realY = y; // store real Y for teleport
+            float spawnY = -30f; // spawn below world
 
-            state.northHologram = spawnDirectionHologram(world, centerX, y, centerZ - 2.0f, "W");
-            state.southHologram = spawnDirectionHologram(world, centerX, y, centerZ + 2.0f, "S");
-            state.eastHologram = spawnDirectionHologram(world, centerX + 2.0f, y, centerZ, "D");
-            state.westHologram = spawnDirectionHologram(world, centerX - 2.0f, y, centerZ, "A");
+            PlayerRef owner = state.playerRef;
+
+            state.northHologram    = spawnDirectionHologram(world, centerX, spawnY, realY, centerZ - 2.0f, "W",  owner);
+            state.southHologram    = spawnDirectionHologram(world, centerX, spawnY, realY, centerZ + 2.0f, "S",  owner);
+            state.eastHologram     = spawnDirectionHologram(world, centerX + 2.0f, spawnY, realY, centerZ, "D",  owner);
+            state.westHologram     = spawnDirectionHologram(world, centerX - 2.0f, spawnY, realY, centerZ, "A",  owner);
 
             float diagDist = 2.0f;
-            state.northEastHologram = spawnDirectionHologram(world, centerX + diagDist, y, centerZ - diagDist, "WD");
-            state.northWestHologram = spawnDirectionHologram(world, centerX - diagDist, y, centerZ - diagDist, "WA");
-            state.southEastHologram = spawnDirectionHologram(world, centerX + diagDist, y, centerZ + diagDist, "SD");
-            state.southWestHologram = spawnDirectionHologram(world, centerX - diagDist, y, centerZ + diagDist, "SA");
+            state.northEastHologram = spawnDirectionHologram(world, centerX + diagDist, spawnY, realY, centerZ - diagDist, "WD", owner);
+            state.northWestHologram = spawnDirectionHologram(world, centerX - diagDist, spawnY, realY, centerZ - diagDist, "WA", owner);
+            state.southEastHologram = spawnDirectionHologram(world, centerX + diagDist, spawnY, realY, centerZ + diagDist, "SD", owner);
+            state.southWestHologram = spawnDirectionHologram(world, centerX - diagDist, spawnY, realY, centerZ + diagDist, "SA", owner);
 
         } catch (Exception e) {
             System.err.println("[GridMove] [ERROR] Failed to spawn holograms: " + e.getMessage());
         }
     }
 
-    private Ref<EntityStore> spawnDirectionHologram(World world, float x, float y, float z, String text) {
+    /**
+     * FIX #7: Spawn hologram at spawnY (y=-30), teleport to realY immediately,
+     * schedule hideEntityFromOthers() after 150ms so only the owner sees it.
+     */
+    private Ref<EntityStore> spawnDirectionHologram(World world,
+                                                    float x, float spawnY, float realY, float z,
+                                                    String text, PlayerRef owner) {
         try {
             Holder<EntityStore> holder = EntityStore.REGISTRY.newHolder();
             ProjectileComponent projectileComponent = new ProjectileComponent("Projectile");
 
             holder.putComponent(ProjectileComponent.getComponentType(), projectileComponent);
             holder.putComponent(TransformComponent.getComponentType(),
-                    new TransformComponent(new Vector3d(x, y, z), new Vector3f(0, 0, 0)));
+                    new TransformComponent(new Vector3d(x, spawnY, z), new Vector3f(0, 0, 0)));
             holder.ensureComponent(UUIDComponent.getComponentType());
 
             if (projectileComponent.getProjectile() == null) {
@@ -104,14 +121,31 @@ public class GridMoveManager {
             }
 
             Store<EntityStore> store = world.getEntityStore().getStore();
-            holder.addComponent(NetworkId.getComponentType(),
-                    new NetworkId(store.getExternalData().takeNextNetworkId()));
-
+            int netId = store.getExternalData().takeNextNetworkId();
+            holder.addComponent(NetworkId.getComponentType(), new NetworkId(netId));
             holder.addComponent(Nameplate.getComponentType(), new Nameplate(text));
 
             Ref<EntityStore> hologramRef = store.addEntity(holder, com.hypixel.hytale.component.AddReason.SPAWN);
 
+            if (hologramRef == null) return null;
+
+            // Teleport to real Y immediately
+            try {
+                TransformComponent tc = store.getComponent(hologramRef, TransformComponent.getComponentType());
+                if (tc != null) tc.setPosition(new Vector3d(x, realY, z));
+            } catch (Exception ignored) {}
+
             GridMoveCommand.ALL_HOLOGRAMS.add(hologramRef);
+
+            // FIX #7: hide from non-owners after entity-tracker broadcasts
+            if (owner != null) {
+                final Ref<EntityStore> finalRef = hologramRef;
+                final int finalNetId = netId;
+                final PlayerRef finalOwner = owner;
+                HOLOGRAM_SCHED.schedule(() -> world.execute(() ->
+                        PlayerEntityController.hideEntityFromOthers(world, finalRef, finalOwner, finalNetId)
+                ), 150L, TimeUnit.MILLISECONDS);
+            }
 
             return hologramRef;
 
@@ -122,7 +156,7 @@ public class GridMoveManager {
     }
 
     /**
-     * Move existing holograms to new position (no destroy+recreate)
+     * Move existing holograms to new position (no destroy+recreate).
      */
     public void moveDirectionHolograms(World world, GridPlayerState state) {
         float centerX = (state.currentGridX * 2.0f) + 1.0f;
@@ -140,24 +174,44 @@ public class GridMoveManager {
         moveHologram(store, state.northWestHologram, centerX - diagDist, y, centerZ - diagDist);
         moveHologram(store, state.southEastHologram, centerX + diagDist, y, centerZ + diagDist);
         moveHologram(store, state.southWestHologram, centerX - diagDist, y, centerZ + diagDist);
+
+        // FIX #7: re-hide from non-owners after each move so newly-in-range players don't see them
+        if (state.playerRef != null) {
+            hideAllHologramsFromOthers(world, state, state.playerRef);
+        }
     }
 
     private void moveHologram(Store<EntityStore> store, Ref<EntityStore> hologramRef, float x, float y, float z) {
-        if (hologramRef == null || !hologramRef.isValid()) {
-            return;
-        }
+        if (hologramRef == null || !hologramRef.isValid()) return;
         try {
             TransformComponent transform = store.getComponent(hologramRef, TransformComponent.getComponentType());
             if (transform != null) {
                 transform.setPosition(new Vector3d(x, y, z));
             }
-        } catch (Exception e) {
-            // Silently ignore
+        } catch (Exception ignored) {}
+    }
+
+    /**
+     * FIX #7: After moving holograms, re-send hide packets to any player newly in range.
+     */
+    private void hideAllHologramsFromOthers(World world, GridPlayerState state, PlayerRef owner) {
+        Ref<EntityStore>[] refs = new Ref[]{
+                state.northHologram, state.southHologram, state.eastHologram, state.westHologram,
+                state.northEastHologram, state.northWestHologram, state.southEastHologram, state.southWestHologram
+        };
+        Store<EntityStore> store = world.getEntityStore().getStore();
+        for (Ref<EntityStore> ref : refs) {
+            if (ref == null || !ref.isValid()) continue;
+            try {
+                NetworkId netIdComp = store.getComponent(ref, NetworkId.getComponentType());
+                if (netIdComp == null) continue;
+                PlayerEntityController.hideEntityFromOthers(world, ref, owner, netIdComp.getId());
+            } catch (Exception ignored) {}
         }
     }
 
     /**
-     * Fallback: destroy + recreate if move fails
+     * Fallback: destroy + recreate if move fails.
      */
     public void updateDirectionHolograms(World world, GridPlayerState state) {
         boolean allValid = state.northHologram != null && state.northHologram.isValid()
@@ -215,9 +269,7 @@ public class GridMoveManager {
             try {
                 world.getEntityStore().getStore().removeEntity(hologramRef, RemoveReason.REMOVE);
                 GridMoveCommand.ALL_HOLOGRAMS.remove(hologramRef);
-            } catch (Exception e) {
-                // Silently ignore
-            }
+            } catch (Exception ignored) {}
         }
     }
 
@@ -233,7 +285,7 @@ public class GridMoveManager {
         return playerStates.values();
     }
 
-    /** Get all PlayerRefs currently in the game (for broadcasting messages) */
+    /** Get all PlayerRefs currently in the game (for broadcasting messages). */
     public java.util.List<com.hypixel.hytale.server.core.universe.PlayerRef> getAllPlayerRefs() {
         java.util.List<com.hypixel.hytale.server.core.universe.PlayerRef> refs = new java.util.ArrayList<>();
         for (GridPlayerState state : playerStates.values()) {

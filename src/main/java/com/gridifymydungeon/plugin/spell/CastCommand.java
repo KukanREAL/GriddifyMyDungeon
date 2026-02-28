@@ -24,20 +24,8 @@ import java.util.Set;
 /**
  * /Cast <spell>
  *
- * Pattern behaviour:
- *
- *   SELF / AURA         - Fires from NPC immediately, no freeze needed. Just /CastFinal.
- *
- *   CONE / LINE / WALL  - NPC freezes. Player walks AROUND the NPC to rotate the
- *                         direction (player position relative to NPC = facing direction).
- *                         Red overlay updates live. /CastFinal fires.
- *
- *   SINGLE_TARGET       - NPC freezes. Red cell follows player body as aim. /CastFinal fires.
- *
- *   SPHERE / CUBE / etc - NPC freezes. Full area preview centred on player body. /CastFinal fires.
- *
- * Range overlay: Grid_Range tiles are spawned at /cast to show the spell's reach.
- * They are cleared at /castfinal or /castcancel.
+ * FIX #1: showRangeOverlay now receives playerRef so Grid_Range tiles are
+ * spawned at y=-30, teleported to real Y, and hidden from non-owners.
  */
 public class CastCommand extends AbstractPlayerCommand {
     private final GridMoveManager playerManager;
@@ -65,14 +53,11 @@ public class CastCommand extends AbstractPlayerCommand {
 
         GridPlayerState state = playerManager.getState(playerRef);
 
-        // GM controlling a monster can cast without having a personal class
         boolean isGmControlling = DebugRoleWrapper.isGM(roleManager, playerRef) && encounterManager.getControlledMonster() != null;
         if (state.stats.getClassType() == null && !isGmControlling) {
             playerRef.sendMessage(Message.raw("[Griddify] Choose a class first! Use /GridClass").color("#FF0000"));
             return;
         }
-        // GM controlling a monster uses the monster's position — no personal /gridmove needed
-        // Regular players must have their NPC entity active
         if (!isGmControlling && (state.npcEntity == null || !state.npcEntity.isValid())) {
             playerRef.sendMessage(Message.raw("[Griddify] Enable grid movement first! Use /GridMove").color("#FF0000"));
             return;
@@ -123,7 +108,6 @@ public class CastCommand extends AbstractPlayerCommand {
             return;
         }
 
-        // When GM is controlling a monster, cast FROM the monster's grid position
         int casterGridX, casterGridZ;
         float casterY;
         if (isGmControlling) {
@@ -138,29 +122,25 @@ public class CastCommand extends AbstractPlayerCommand {
         }
         SpellPattern pattern = spell.getPattern();
 
-        // Initial direction: player's current body yaw (will rotate live for CONE/LINE/WALL)
         float yaw = 0f;
         try { yaw = playerRef.getTransform().getRotation().getY(); } catch (Exception ignored) {}
-        // getRotation().getY() returns radians; Direction8.fromYaw expects degrees
         float yawDeg = (float) Math.toDegrees(yaw);
         Direction8 initialDirection = Direction8.fromYaw(yawDeg);
 
-        float playerY = casterY; // Use NPC/monster ground Y as reference, not raw body height
+        float playerY = casterY;
 
-        // ── Range overlay: show how far the spell reaches (Grid_Range tiles) ──────────
-        // Shown for all patterns that have a non-zero range. SELF/AURA with range 0
-        // are skipped inside showRangeOverlay automatically.
+        // FIX #1: pass playerRef so range overlay is private to the caster
         final int fCasterGridX = casterGridX, fCasterGridZ = casterGridZ;
         final int fRange = spell.getRangeGrids();
         final float fCasterY = casterY;
-        // Remove movement overlay to prevent texture glitching under spell overlay
         final GridPlayerState fState = state;
+        final PlayerRef fPlayerRef = playerRef;
         world.execute(() -> {
             if (fState.gridOverlayEnabled && !fState.gmMapOverlayActive) {
                 GridOverlayManager.removeGridOverlay(world, fState);
             }
             visualManager.showRangeOverlay(
-                    playerRef.getUuid(), fCasterGridX, fCasterGridZ, fRange, world, fCasterY);
+                    fPlayerRef.getUuid(), fCasterGridX, fCasterGridZ, fRange, world, fCasterY, fPlayerRef);
         });
 
         // -----------------------------------------------------------------------
@@ -179,8 +159,7 @@ public class CastCommand extends AbstractPlayerCommand {
             return;
         }
 
-        // Chromatic Orb: set up state then prompt for /orb element choice
-        // -----------------------------------------------------------------------
+        // Chromatic Orb
         if (spell.getName().equalsIgnoreCase("Chromatic_Orb")) {
             Set<SpellPatternCalculator.GridCell> cells = SpellPatternCalculator.calculatePattern(
                     pattern, initialDirection, casterGridX, casterGridZ,
@@ -194,18 +173,14 @@ public class CastCommand extends AbstractPlayerCommand {
         }
 
         // -----------------------------------------------------------------------
-        // All other patterns: freeze NPC/monster, player walks to aim / rotate
+        // All other patterns: freeze NPC/monster
         // -----------------------------------------------------------------------
-        // For GM controlling a monster: freeze the MONSTER so GMPositionTracker
-        // stops moving it. GM body movement will instead aim the spell overlay.
         if (isGmControlling) {
             com.gridifymydungeon.plugin.dnd.MonsterState mon = encounterManager.getControlledMonster();
             mon.freeze("casting");
-            // Spawn blue movement-range overlay for the monster (same as players see on their turn)
             final com.gridifymydungeon.plugin.dnd.MonsterState monFinal = mon;
             final GridPlayerState gmState = state;
             world.execute(() -> {
-                // Temporarily configure gmState with monster position/moves so BFS uses them
                 gmState.currentGridX   = monFinal.currentGridX;
                 gmState.currentGridZ   = monFinal.currentGridZ;
                 gmState.npcY           = monFinal.spawnY;
@@ -217,7 +192,6 @@ public class CastCommand extends AbstractPlayerCommand {
         state.freeze("casting");
         state.setSpellCastingState(new SpellCastingState(spell, null, initialDirection, casterGridX, casterGridZ, casterY));
 
-        // Compute initial overlay
         Set<SpellPatternCalculator.GridCell> initialCells = computeOverlay(
                 pattern, initialDirection, casterGridX, casterGridZ, spell, casterGridX, casterGridZ);
         visualManager.showSpellArea(playerRef.getUuid(), initialCells, world, playerY);
@@ -253,11 +227,6 @@ public class CastCommand extends AbstractPlayerCommand {
                 spell.getName() + " pattern=" + pattern.name() + " frozen at (" + casterGridX + ", " + casterGridZ + ")");
     }
 
-    /**
-     * Compute the red overlay cells based on pattern and current player position.
-     * For directional patterns: origin=NPC, direction from player-relative-to-NPC.
-     * For targeted patterns: centred on player body (aim cell).
-     */
     public static Set<SpellPatternCalculator.GridCell> computeOverlay(
             SpellPattern pattern, Direction8 direction,
             int casterGridX, int casterGridZ,
@@ -270,19 +239,16 @@ public class CastCommand extends AbstractPlayerCommand {
             case WALL:
             case SELF:
             case AURA:
-                // Always from NPC, direction already updated
                 return SpellPatternCalculator.calculatePattern(
                         pattern, direction, casterGridX, casterGridZ,
                         spell.getRangeGrids(), spell.getAreaGrids());
 
             case SINGLE_TARGET:
-                // One cell under the player body
                 Set<SpellPatternCalculator.GridCell> cell = new HashSet<>();
                 cell.add(new SpellPatternCalculator.GridCell(playerGridX, playerGridZ));
                 return cell;
 
             default:
-                // SPHERE, CUBE, CYLINDER, CHAIN — area centred on player body
                 return SpellPatternCalculator.calculatePattern(
                         pattern, direction, playerGridX, playerGridZ,
                         spell.getRangeGrids(), spell.getAreaGrids());
@@ -296,7 +262,6 @@ public class CastCommand extends AbstractPlayerCommand {
     }
 
     private boolean canAccessSpell(GridPlayerState state, SpellData spell, PlayerRef playerRef) {
-        // ── Monster-type-locked attack ────────────────────────────────────────
         if (spell.isMonsterAttack()) {
             if (!DebugRoleWrapper.isGM(roleManager, playerRef)) return false;
             com.gridifymydungeon.plugin.dnd.MonsterState controlled = encounterManager.getControlledMonster();
@@ -304,12 +269,10 @@ public class CastCommand extends AbstractPlayerCommand {
             return spell.getRequiredMonsterType() == controlled.monsterType;
         }
 
-        // ── Old generic monster attacks (classType == null, not locked) ───────
         if (spell.getClassType() == null && !spell.isSubclassSpell()) {
             return DebugRoleWrapper.isGM(roleManager, playerRef) && encounterManager.getControlledMonster() != null;
         }
 
-        // ── GM controlling a monster with a player-class ──────────────────────
         if (DebugRoleWrapper.isGM(roleManager, playerRef)) {
             com.gridifymydungeon.plugin.dnd.MonsterState controlled = encounterManager.getControlledMonster();
             if (controlled != null) {
@@ -318,7 +281,6 @@ public class CastCommand extends AbstractPlayerCommand {
             }
         }
 
-        // ── Regular player ────────────────────────────────────────────────────
         if (spell.isSubclassSpell()) return spell.getSubclass() == state.stats.getSubclassType();
         return spell.getClassType() == state.stats.getClassType();
     }

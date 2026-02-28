@@ -12,12 +12,14 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Tracks player grid movement state
- * FIXED v5: Added playerRef field for LevelUp/LevelDown commands
+ * Tracks player grid movement state.
+ *
+ * FIX #1: Added rangeOverlay list for Grid_Range tiles (spell reach ring).
+ * FIX #6: Added fogMarkerRef2/fogMarkerNetId2 for the outer 13x13 fog layer.
  */
 public class GridPlayerState {
 
-    // ADDED: Reference to PlayerRef for easy access by commands
+    // Reference to PlayerRef for easy access by commands
     public PlayerRef playerRef;
 
     // Grid tracking
@@ -57,11 +59,15 @@ public class GridPlayerState {
     public Ref<EntityStore> southEastHologram;
     public Ref<EntityStore> southWestHologram;
 
-    // Grid overlay — variable number of Grid_Quarter entities (4 per reachable cell)
+    // Grid overlay — movement range tiles (Grid_Basic / Grid_Player)
     public List<Ref<EntityStore>> gridOverlay = new ArrayList<>();
     public boolean gridOverlayEnabled = false;
-    /** True when the overlay is the GM 100x100 flat map (/grid), false when it's BFS range (/gridon). */
+    /** True when the overlay is the GM static /grid map, false when it's BFS range. */
     public boolean gmMapOverlayActive = false;
+
+    // ── SPELL RANGE overlay — Grid_Range tiles shown during /cast ───────────
+    // FIX #1: Stored per-player so clearRangeOverlay() can remove them at /castfinal or /castcancel
+    public List<Ref<EntityStore>> rangeOverlay = new ArrayList<>();
 
     // One-time "no moves" message — reset each turn
     public boolean noMovesMessageShown = false;
@@ -72,11 +78,14 @@ public class GridPlayerState {
     // Action economy: only 1 action (spell/attack) per turn
     public boolean hasUsedAction = false;
 
-    // ── Fog-of-war test marker (private entity above NPC, visible only to owner) ──
-    public Ref<EntityStore> fogMarkerRef   = null;
-    public int              fogMarkerNetId = -1;
+    // ── Fog-of-war markers ────────────────────────────────────────────────────
+    // FIX #6: Two fog layers — inner 11×11 and outer 13×13 ring
+    public Ref<EntityStore> fogMarkerRef    = null;   // inner  11×11 (scale 5.5f)
+    public int              fogMarkerNetId  = -1;
+    public Ref<EntityStore> fogMarkerRef2   = null;   // outer  13×13 (scale 6.5f)
+    public int              fogMarkerNetId2 = -1;
 
-    // ── Equipment snapshot (taken at /gridmove, re-sent to late viewers) ──
+    // ── Equipment snapshot (taken at /gridmove, re-sent to late viewers) ─────
     public String[] storedArmorIds   = null;
     public String   storedRightHand  = null;
     public String   storedLeftHand   = null;
@@ -107,17 +116,13 @@ public class GridPlayerState {
 
     public void consumeMoves(double cost) {
         remainingMoves -= cost;
-        if (remainingMoves < 0) {
-            remainingMoves = 0;
-        }
+        if (remainingMoves < 0) remainingMoves = 0;
     }
 
     public void resetMoves() {
-        if (hasMaxMovesSet()) {
-            remainingMoves = maxMoves;
-        }
+        if (hasMaxMovesSet()) remainingMoves = maxMoves;
         noMovesMessageShown = false;
-        hasUsedAction = false; // Reset action for new turn
+        hasUsedAction = false;
     }
 
     public void freeze(String reason) {

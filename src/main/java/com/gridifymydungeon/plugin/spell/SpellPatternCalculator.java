@@ -6,14 +6,17 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * Calculate affected grid cells for spell patterns
- * Uses 8-directional system (N, NE, E, SE, S, SW, W, NW)
+ * Calculate affected grid cells for spell patterns.
+ *
+ * FIX #5/#9: calculateSphere() now excludes the center cell (0,0),
+ * meaning AURA and SPHERE patterns cannot hit the caster themselves.
+ * This prevents monsters and players from targeting themselves with
+ * Whirlwind Attack, Spirit Guardians, Hurricane Strike, etc.
+ *
+ * Melee SINGLE_TARGET self-block is handled in CastFinalCommand.
  */
 public class SpellPatternCalculator {
 
-    /**
-     * Grid cell position
-     */
     public static class GridCell {
         public final int x;
         public final int z;
@@ -37,17 +40,6 @@ public class SpellPatternCalculator {
         }
     }
 
-    /**
-     * Calculate affected cells for a spell pattern
-     *
-     * @param pattern Spell pattern type
-     * @param direction Facing direction (for cones/lines)
-     * @param originX Origin grid X (caster position or target point)
-     * @param originZ Origin grid Z
-     * @param rangeGrids Maximum range in grids
-     * @param areaGrids Area size (radius for sphere, length for line, etc.)
-     * @return Set of affected grid cells
-     */
     public static Set<GridCell> calculatePattern(SpellPattern pattern, Direction8 direction,
                                                  int originX, int originZ,
                                                  int rangeGrids, int areaGrids) {
@@ -68,7 +60,8 @@ public class SpellPatternCalculator {
 
             case SPHERE:
             case CYLINDER:
-                cells.addAll(calculateSphere(originX, originZ, areaGrids));
+                // FIX #5/#9: pass excludeCenter=true so caster is never in the area
+                cells.addAll(calculateSphere(originX, originZ, areaGrids, true));
                 break;
 
             case CUBE:
@@ -76,7 +69,8 @@ public class SpellPatternCalculator {
                 break;
 
             case AURA:
-                cells.addAll(calculateSphere(originX, originZ, areaGrids));
+                // FIX #5/#9: AURA always excludes center — hits AROUND the caster, not self
+                cells.addAll(calculateSphere(originX, originZ, areaGrids, true));
                 break;
 
             case WALL:
@@ -84,11 +78,11 @@ public class SpellPatternCalculator {
                 break;
 
             case SELF:
+                // SELF targets only the caster's cell — intentional self-buff/heal
                 cells.add(new GridCell(originX, originZ));
                 break;
 
             case CHAIN:
-                // Chain is handled differently - start with origin
                 cells.add(new GridCell(originX, originZ));
                 break;
         }
@@ -97,14 +91,7 @@ public class SpellPatternCalculator {
     }
 
     /**
-     * D&D 5e cone — correct for all 8 directions, matching expected cell counts.
-     *
-     * Cardinal (N/S/E/W): at forward distance d, half-width = floor(d/2).
-     *   d=1: 1 cell, d=2: 3 cells, d=3: 3 cells → total 7 for length=3.
-     *
-     * Diagonal (NE/NW/SE/SW): cells in the forward quadrant bounded by
-     *   cx + cz <= length + 1  (where cx,cz are the per-axis component steps).
-     *   This gives 6 cells for length=3 (a right-triangle in the quadrant).
+     * D&D 5e cone — correct for all 8 directions.
      */
     private static Set<GridCell> calculateCone(Direction8 direction, int originX, int originZ, int length) {
         Set<GridCell> cells = new HashSet<>();
@@ -116,27 +103,23 @@ public class SpellPatternCalculator {
         for (int rx = -length; rx <= length; rx++) {
             for (int rz = -length; rz <= length; rz++) {
                 if (isDiagonal) {
-                    // Must be strictly in the forward quadrant
                     if (rx * fdx <= 0 || rz * fdz <= 0) continue;
                     int cx = Math.abs(rx);
                     int cz = Math.abs(rz);
                     int fwdD = Math.max(cx, cz);
                     if (fwdD < 1 || fwdD > length) continue;
-                    // D&D diagonal cone: bounded by the anti-diagonal cx+cz <= length+1
                     if (cx + cz <= length + 1) {
                         cells.add(new GridCell(originX + rx, originZ + rz));
                     }
                 } else if (fdx == 0) {
-                    // Pure Z (NORTH or SOUTH)
                     if (rz * fdz <= 0) continue;
                     int fwdD = Math.abs(rz);
                     int perpD = Math.abs(rx);
                     if (fwdD < 1 || fwdD > length) continue;
-                    if (perpD <= fwdD / 2) {   // integer floor division
+                    if (perpD <= fwdD / 2) {
                         cells.add(new GridCell(originX + rx, originZ + rz));
                     }
                 } else {
-                    // Pure X (EAST or WEST)
                     if (rx * fdx <= 0) continue;
                     int fwdD = Math.abs(rx);
                     int perpD = Math.abs(rz);
@@ -151,87 +134,65 @@ public class SpellPatternCalculator {
         return cells;
     }
 
-    /**
-     * Calculate line pattern — starts 1 cell in front of the caster (does not include caster cell).
-     */
     private static Set<GridCell> calculateLine(Direction8 direction, int originX, int originZ, int length) {
         Set<GridCell> cells = new HashSet<>();
-
         int dx = direction.getDeltaX();
         int dz = direction.getDeltaZ();
-
-        // i starts at 1 to skip the caster's own cell
         for (int i = 1; i <= length; i++) {
             cells.add(new GridCell(originX + dx * i, originZ + dz * i));
         }
-
         return cells;
     }
 
     /**
-     * Calculate sphere/cylinder pattern (circular area)
+     * Sphere/cylinder/aura pattern.
+     *
+     * FIX #5/#9: excludeCenter=true skips the origin cell so caster cannot hit themselves.
      */
-    private static Set<GridCell> calculateSphere(int centerX, int centerZ, int radius) {
+    private static Set<GridCell> calculateSphere(int centerX, int centerZ, int radius, boolean excludeCenter) {
         Set<GridCell> cells = new HashSet<>();
-
         for (int x = -radius; x <= radius; x++) {
             for (int z = -radius; z <= radius; z++) {
-                // Use circular distance
+                // FIX #5/#9: skip center cell when excludeCenter is true
+                if (excludeCenter && x == 0 && z == 0) continue;
                 double distance = Math.sqrt(x * x + z * z);
                 if (distance <= radius) {
                     cells.add(new GridCell(centerX + x, centerZ + z));
                 }
             }
         }
-
         return cells;
     }
 
-    /**
-     * Calculate cube pattern (square area)
-     */
     private static Set<GridCell> calculateCube(int centerX, int centerZ, int radius) {
         Set<GridCell> cells = new HashSet<>();
-
         for (int x = -radius; x <= radius; x++) {
             for (int z = -radius; z <= radius; z++) {
                 cells.add(new GridCell(centerX + x, centerZ + z));
             }
         }
-
         return cells;
     }
 
-    /**
-     * Calculate wall pattern (line perpendicular to direction)
-     */
     private static Set<GridCell> calculateWall(Direction8 direction, int originX, int originZ, int length) {
         Set<GridCell> cells = new HashSet<>();
 
         int fdx = direction.getDeltaX();
         int fdz = direction.getDeltaZ();
         boolean isDiagonal = (fdx != 0 && fdz != 0);
-        int halfWidth = length / 2;          // area=2 → halfWidth=1 → 3 cells wide/deep
-        int depth     = halfWidth * 2 + 1;   // area=2 → depth=3 rows (3x3 total)
+        int halfWidth = length / 2;
+        int depth     = halfWidth * 2 + 1;
 
         if (isDiagonal) {
-            // For diagonal directions, generate a proper 3×3 SQUARE centred 2 steps ahead
-            // in the diagonal direction. centre = (fdx*2, fdz*2) from origin.
-            // The 16 possible positions form a ring around the caster (8 cardinal + 8 diagonal).
-            // We pick the 3×3 square nearest the diagonal direction.
-            //
-            // halfWidth=1 → gather cells (cx + rx, cz + rz) for rx,rz in [-1,+1]
-            int cx = originX + fdx * (halfWidth + 1);   // centre of 3×3 (2 steps away for halfWidth=1)
+            int cx = originX + fdx * (halfWidth + 1);
             int cz = originZ + fdz * (halfWidth + 1);
             for (int rx = -halfWidth; rx <= halfWidth; rx++) {
                 for (int rz = -halfWidth; rz <= halfWidth; rz++) {
                     cells.add(new GridCell(cx + rx, cz + rz));
                 }
             }
-            // Exclude the caster's own cell (should not be in range for halfWidth=1 anyway)
             cells.remove(new GridCell(originX, originZ));
         } else {
-            // Cardinal direction: perpendicular sweep + depth rows in front
             int perpDx = -fdz;
             int perpDz =  fdx;
             for (int d = 1; d <= depth; d++) {
@@ -245,18 +206,12 @@ public class SpellPatternCalculator {
         return cells;
     }
 
-    /**
-     * Calculate distance between two grid cells (in grids)
-     */
     public static int getDistance(int x1, int z1, int x2, int z2) {
         int dx = Math.abs(x2 - x1);
         int dz = Math.abs(z2 - z1);
-        return Math.max(dx, dz); // D&D uses diagonal = 1 grid
+        return Math.max(dx, dz);
     }
 
-    /**
-     * Check if a grid cell is within range of origin
-     */
     public static boolean isInRange(int originX, int originZ, int targetX, int targetZ, int rangeGrids) {
         return getDistance(originX, originZ, targetX, targetZ) <= rangeGrids;
     }
