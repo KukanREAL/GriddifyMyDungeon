@@ -55,6 +55,10 @@ public class SpellVisualManager {
     // Spell range ring (yellow, Grid_Range)  FIX #1
     private final Map<UUID, List<Ref<EntityStore>>> playerRangeVisuals = new HashMap<>();
 
+    // Pools for re-using visual entities
+    private final Map<UUID, List<Ref<EntityStore>>> playerSpellPool = new HashMap<>();
+    private final Map<UUID, List<Ref<EntityStore>>> playerRangePool = new HashMap<>();
+
     private static final String SPELL_MODEL_ID    = "Grid_Spell";
     private static final String RANGE_MODEL_ID    = "Grid_Range";
     private static final String FALLBACK_MODEL_ID = "Grid_Basic";
@@ -166,6 +170,36 @@ public class SpellVisualManager {
 
     public void clearAllSpellVisuals(World world) {
         for (UUID id : new HashSet<>(playerSpellVisuals.keySet())) clearSpellVisuals(id, world);
+    }
+
+    /** Fully destroy spell visuals AND pools for ALL players. */
+    public void destroyAllSpellVisuals(World world) {
+        for (UUID id : new HashSet<>(playerSpellVisuals.keySet())) destroySpellVisuals(id, world);
+        // Also destroy any orphaned pool entries
+        for (UUID id : new HashSet<>(playerSpellPool.keySet())) destroySpellVisuals(id, world);
+    }
+
+    /** Fully destroy spell visuals AND its pool for one player. */
+    public void destroySpellVisuals(UUID playerUUID, World world) {
+        List<Ref<EntityStore>> visuals = playerSpellVisuals.remove(playerUUID);
+        List<Ref<EntityStore>> pool = playerSpellPool.remove(playerUUID);
+        Store<EntityStore> store = world.getEntityStore().getStore();
+        if (visuals != null) {
+            for (Ref<EntityStore> ref : visuals) {
+                if (ref != null && ref.isValid()) {
+                    try { store.removeEntity(ref, RemoveReason.REMOVE); } catch (Exception ignored) {}
+                }
+            }
+            visuals.clear();
+        }
+        if (pool != null) {
+            for (Ref<EntityStore> ref : pool) {
+                if (ref != null && ref.isValid()) {
+                    try { store.removeEntity(ref, RemoveReason.REMOVE); } catch (Exception ignored) {}
+                }
+            }
+            pool.clear();
+        }
     }
 
 // ========================================================
@@ -317,17 +351,34 @@ public class SpellVisualManager {
         showRangeOverlay(playerUUID, casterGridX, casterGridZ, rangeGrids, world, npcY, null);
     }
 
-    /** FIX #1: Clear the Grid_Range ring. Call at /castfinal and /castcancel. */
+    /** Clear the Grid_Range ring — parks tiles at y=-30 for reuse, never destroys them. */
     public void clearRangeOverlay(UUID playerUUID, World world) {
         List<Ref<EntityStore>> refs = playerRangeVisuals.remove(playerUUID);
         if (refs == null) return;
+        final float PARKED_Y = -30f;
         Store<EntityStore> store = world.getEntityStore().getStore();
+        List<Ref<EntityStore>> pool = playerRangePool.computeIfAbsent(playerUUID, k -> new ArrayList<>());
         for (Ref<EntityStore> ref : refs) {
             if (ref != null && ref.isValid()) {
-                try { store.removeEntity(ref, RemoveReason.REMOVE); } catch (Exception ignored) {}
+                try {
+                    TransformComponent tc = store.getComponent(ref, TransformComponent.getComponentType());
+                    if (tc != null) tc.setPosition(new Vector3d(0, PARKED_Y, 0));
+                } catch (Exception ignored) {}
+                pool.add(ref);
             }
         }
         refs.clear();
+    }
+
+    /** Fully destroy the range ring AND its pool (call on session end / /gridoff). */
+    public void destroyRangeOverlay(UUID playerUUID, World world) {
+        List<Ref<EntityStore>> refs = playerRangeVisuals.remove(playerUUID);
+        List<Ref<EntityStore>> pool = playerRangePool.remove(playerUUID);
+        Store<EntityStore> store = world.getEntityStore().getStore();
+        if (refs != null) for (Ref<EntityStore> ref : refs)
+            if (ref != null && ref.isValid()) { try { store.removeEntity(ref, RemoveReason.REMOVE); } catch (Exception ignored) {} }
+        if (pool != null) for (Ref<EntityStore> ref : pool)
+            if (ref != null && ref.isValid()) { try { store.removeEntity(ref, RemoveReason.REMOVE); } catch (Exception ignored) {} }
     }
 
     public void clearAllRangeVisuals(World world) {

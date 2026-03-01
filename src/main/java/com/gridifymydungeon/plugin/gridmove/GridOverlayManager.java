@@ -204,10 +204,11 @@ public class GridOverlayManager {
         // Static /grid map — do NOT auto-refresh on movement
         if (state.gmMapOverlayActive) return;
 
-        removeGridOverlayEntities(world, state);
         if (excludePlayer != null) {
+            // Player path: pool manages its own cleanup — never pre-clear
             spawnPlayerGridOverlay(world, state, collisionDetector, excludePlayer, owner);
         } else {
+            removeGridOverlayEntities(world, state);
             spawnGMBFSOverlay(world, state, collisionDetector);
         }
     }
@@ -280,131 +281,170 @@ public class GridOverlayManager {
         ), 200L, TimeUnit.MILLISECONDS);
     }
 
+
+    // ─── helpers used by updateCellsWithReuse ────────────────────────────
+
+    /** Hide tile from every player except owner. Reads netId from component. */
+    private static void hideFromNonOwners(Store<EntityStore> store, World world,
+                                          Ref<EntityStore> ref, PlayerRef owner) {
+        try {
+            NetworkId nc = store.getComponent(ref, NetworkId.getComponentType());
+            if (nc != null)
+                com.gridifymydungeon.plugin.dnd.PlayerEntityController
+                        .hideEntityFromOthers(world, ref, owner, nc.getId());
+        } catch (Exception ignored) {}
+    }
+
+    /** Pop the last valid ref from a pool list, discarding dead ones. */
+    private static Ref<EntityStore> poolPop(java.util.List<Ref<EntityStore>> pool) {
+        while (!pool.isEmpty()) {
+            Ref<EntityStore> r = pool.remove(pool.size() - 1);
+            if (r != null && r.isValid()) return r;
+        }
+        return null;
+    }
+
+    // Simple data bag for a fresh-spawn whose hide+teleport must happen after 200 ms
+    private static final class PendingTile {
+        final Ref<EntityStore> ref;
+        final float cx, targetY, cz;
+        PendingTile(Ref<EntityStore> r, float cx, float y, float cz) {
+            ref = r; this.cx = cx; this.targetY = y; this.cz = cz;
+        }
+    }
+
     /**
-     * FIX #9: Update grid overlay by reusing existing tiles (teleport) instead of despawn/respawn.
-     * This prevents flickering when the player moves.
-     */
-    /**
-     * BUG 2 FIX: Mirror fog-of-war moveFogMarker pattern exactly.
+     * Update the player grid overlay using a zero-despawn pool strategy.
      *
-     * For REUSED tiles (already visible to owner): teleport then call
-     * hideEntityFromOthers IMMEDIATELY using the stored networkId — no delay.
-     * This is identical to what moveFogMarker does and is why fog never glitches.
+     * FIX 2 — Ledge / unavailable-cell tiles stay VISIBLE to owner at y=-30:
+     *   When a tile leaves BFS range (wall, ledge, too far) it is teleported to y=-30
+     *   and parked in gridTilePool.  It is hidden from other players but the OWNER
+     *   still sees it below the world.  When the same cell re-enters range the tile is
+     *   teleported back up — no spawn flash, no new entity needed.
      *
-     * For NEW tiles (first spawn): need 200ms for entity tracker to broadcast
-     * the spawn to nearby players, then hide from non-owners.
+     * FIX 3 — Delta ground-scan:
+     *   groundYCache persists between moves in GridPlayerState.
+     *   floodFillReachable (below) reads from this cache for cells it already knows,
+     *   so block-scanning only happens for truly-new cells entering the BFS frontier.
      */
     private static void updateCellsWithReuse(World world, GridPlayerState state,
                                              List<ReachableCell> newCells, Model model,
                                              float yOffset, PlayerRef owner) {
         Store<EntityStore> store = world.getEntityStore().getStore();
+        final float PARKED_Y = -30f;
 
-        // Build lookup for new cells
-        java.util.Set<String> newCoords = new java.util.HashSet<>();
-        java.util.Map<String, ReachableCell> newCellMap = new java.util.HashMap<>();
-        for (ReachableCell cell : newCells) {
-            String key = cell.gridX + "," + cell.gridZ;
-            newCoords.add(key);
-            newCellMap.put(key, cell);
-        }
+        // Build lookup for the incoming cell set
+        java.util.Map<String, ReachableCell> incoming = new java.util.HashMap<>();
+        for (ReachableCell c : newCells) incoming.put(c.gridX + "," + c.gridZ, c);
 
-        int reused = 0;
-        java.util.List<String> newlySpawned = new java.util.ArrayList<>();
-
-        // 1. Handle existing tiles
+        // ── 1. Process currently-active tiles ────────────────────────────────
         for (String key : new java.util.HashSet<>(state.gridTileMap.keySet())) {
-            if (newCoords.contains(key)) {
-                // Tile still needed: teleport to new position, then hide immediately (fog pattern)
-                Ref<EntityStore> ref = state.gridTileMap.get(key);
-                if (ref != null && ref.isValid()) {
-                    ReachableCell cell = newCellMap.get(key);
-                    float cx = (cell.gridX * 2.0f) + 1.0f;
-                    float cz = (cell.gridZ * 2.0f) + 1.0f;
-                    float y  = cell.groundY + yOffset;
-                    try {
-                        TransformComponent tc = store.getComponent(ref, TransformComponent.getComponentType());
-                        if (tc != null) tc.setPosition(new Vector3d(cx, y, cz));
-                    } catch (Exception ignored) {}
+            Ref<EntityStore> ref = state.gridTileMap.get(key);
+            if (ref == null || !ref.isValid()) { state.gridTileMap.remove(key); continue; }
 
-                    // FOG PATTERN: hide immediately after teleport using stored netId
-                    if (owner != null) {
-                        Integer netId = state.gridTileNetIds.get(key);
-                        if (netId != null) {
-                            com.gridifymydungeon.plugin.dnd.PlayerEntityController
-                                    .hideEntityFromOthers(world, ref, owner, netId);
-                        }
-                    }
-                    reused++;
-                }
-                newCoords.remove(key);
+            ReachableCell cell = incoming.remove(key);   // null → leaving range
+            if (cell != null) {
+                // Still reachable — teleport to updated position, re-hide from others
+                float cx = (cell.gridX * 2.0f) + 1.0f;
+                float cz = (cell.gridZ * 2.0f) + 1.0f;
+                float y  = cell.groundY + yOffset;
+                try {
+                    TransformComponent tc = store.getComponent(ref, TransformComponent.getComponentType());
+                    if (tc != null) tc.setPosition(new Vector3d(cx, y, cz));
+                } catch (Exception ignored) {}
+                if (owner != null) hideFromNonOwners(store, world, ref, owner);
             } else {
-                // No longer needed — despawn
-                Ref<EntityStore> ref = state.gridTileMap.remove(key);
-                state.gridTileNetIds.remove(key);
-                if (ref != null && ref.isValid()) {
-                    try { store.removeEntity(ref, RemoveReason.REMOVE); } catch (Exception ignored) {}
-                }
+                // Leaving BFS range — park at y=-30, VISIBLE TO OWNER, hidden from others.
+                // Owner sees their "shadow" grid below the world; tile ready for instant reuse.
+                try {
+                    TransformComponent tc = store.getComponent(ref, TransformComponent.getComponentType());
+                    if (tc != null) tc.setPosition(new Vector3d(0, PARKED_Y, 0));
+                } catch (Exception ignored) {}
+                if (owner != null) hideFromNonOwners(store, world, ref, owner);
+                state.gridTileMap.remove(key);
+                state.gridTilePool.add(ref);
             }
         }
 
-        // 2. Spawn new tiles
-        int spawned = 0;
-        for (String key : newCoords) {
-            ReachableCell cell = newCellMap.get(key);
+        // ── 2. Fill new cells — recycle pool tiles first, spawn fresh if needed ─
+        java.util.List<PendingTile> pending = new java.util.ArrayList<>();
+
+        for (java.util.Map.Entry<String, ReachableCell> e : incoming.entrySet()) {
+            String key = e.getKey();
+            ReachableCell cell = e.getValue();
             float cx = (cell.gridX * 2.0f) + 1.0f;
             float cz = (cell.gridZ * 2.0f) + 1.0f;
             float targetY = cell.groundY + yOffset;
 
+            Ref<EntityStore> recycled = poolPop(state.gridTilePool);
+            if (recycled != null) {
+                // Recycled tile: already known to entity-tracker → teleport + hide immediately
+                try {
+                    TransformComponent tc = store.getComponent(recycled, TransformComponent.getComponentType());
+                    if (tc != null) tc.setPosition(new Vector3d(cx, targetY, cz));
+                } catch (Exception ignored) {}
+                if (owner != null) hideFromNonOwners(store, world, recycled, owner);
+                state.gridTileMap.put(key, recycled);
+                continue;
+            }
+
+            // Pool exhausted — brand-new entity, born at y=-30 (below world)
             boolean isDifficult = TerrainManager.isDifficult(cell.gridX, cell.gridZ, cell.groundY, world);
-            Model tileModel = isDifficult ? cachedDifficultModel : model;
-
-            Ref<EntityStore> ref = spawnTile(store, tileModel, cx, targetY, cz);
+            Ref<EntityStore> ref = spawnTile(store, isDifficult ? cachedDifficultModel : model, cx, PARKED_Y, cz);
             if (ref == null) continue;
-
-            // Store netId for immediate-hide on future moves (fog pattern)
-            try {
-                NetworkId netComp = store.getComponent(ref, NetworkId.getComponentType());
-                if (netComp != null) state.gridTileNetIds.put(key, netComp.getId());
-            } catch (Exception ignored) {}
-
             state.gridTileMap.put(key, ref);
-            newlySpawned.add(key);
-            spawned++;
+            pending.add(new PendingTile(ref, cx, targetY, cz));
         }
 
-        // 3. Rebuild gridOverlay
+        // ── 3. Rebuild gridOverlay list ───────────────────────────────────────
         state.gridOverlay.clear();
         state.gridOverlay.addAll(state.gridTileMap.values());
 
-        // 4. Newly spawned tiles need 200ms before hide (entity tracker needs one tick)
-        if (owner != null && !newlySpawned.isEmpty()) {
-            final PlayerRef finalOwner = owner;
-            final java.util.List<String> spawnedKeys = new java.util.ArrayList<>(newlySpawned);
+        // ── 4. Fresh tiles: after 200 ms hide from others, then teleport up ───
+        // Born at y=-30 so the entity-tracker broadcasts them there first.
+        // After one tick we hide from non-owners, THEN move to real Y.
+        // Owner sees the tile pop up; non-owners never see it at real Y.
+        if (!pending.isEmpty()) {
+            final PlayerRef fOwner = owner;
+            final java.util.List<PendingTile> fPending = pending;
+            final Store<EntityStore> fStore = store;
             SCHED.schedule(() -> world.execute(() -> {
-                for (String key : spawnedKeys) {
-                    Ref<EntityStore> ref = state.gridTileMap.get(key);
-                    Integer netId = state.gridTileNetIds.get(key);
-                    if (ref != null && ref.isValid() && netId != null) {
-                        com.gridifymydungeon.plugin.dnd.PlayerEntityController
-                                .hideEntityFromOthers(world, ref, finalOwner, netId);
-                    }
+                for (PendingTile pt : fPending) {
+                    if (!pt.ref.isValid()) continue;
+                    if (fOwner != null) hideFromNonOwners(fStore, world, pt.ref, fOwner);
+                    try {
+                        TransformComponent tc = fStore.getComponent(pt.ref, TransformComponent.getComponentType());
+                        if (tc != null) tc.setPosition(new Vector3d(pt.cx, pt.targetY, pt.cz));
+                    } catch (Exception ignored) {}
                 }
             }), 200L, TimeUnit.MILLISECONDS);
         }
 
-        System.out.println("[GridMove] [GRID] updateCellsWithReuse: reused=" + reused + " spawned=" + spawned);
+        System.out.println("[GridMove][GRID] active=" + state.gridTileMap.size()
+                + " pool=" + state.gridTilePool.size()
+                + " freshSpawn=" + pending.size());
     }
+
 
     private static void removeGridOverlayEntities(World world, GridPlayerState state) {
         Store<EntityStore> store = world.getEntityStore().getStore();
+        // Remove active tiles
         for (Ref<EntityStore> ref : state.gridOverlay) {
-            if (ref != null && ref.isValid()) {
+            if (ref != null && ref.isValid())
                 try { store.removeEntity(ref, RemoveReason.REMOVE); } catch (Exception ignored) {}
-            }
+        }
+        // Remove parked pool tiles (full teardown on /gridoff)
+        for (Ref<EntityStore> ref : state.gridTilePool) {
+            if (ref != null && ref.isValid())
+                try { store.removeEntity(ref, RemoveReason.REMOVE); } catch (Exception ignored) {}
         }
         state.gridOverlay.clear();
         state.gridTileMap.clear();
-        state.gridTileNetIds.clear(); // BUG 2 FIX: clear stored netIds too
+        state.gridTilePool.clear();
+        state.gridTileNetIds.clear();
+        state.groundYCache.clear();
+        state.prevBfsX = Integer.MIN_VALUE;
+        state.prevBfsZ = Integer.MIN_VALUE;
         state.gridTilesHiddenFromOthers = false;
     }
 
@@ -412,20 +452,33 @@ public class GridOverlayManager {
     // BFS FLOOD-FILL
     // ========================================================
 
+    /**
+     * FIX 3 — Delta BFS (ground-scan cache).
+     *
+     * groundYCache in GridPlayerState persists between moves.  For cells the BFS
+     * has already visited, we return the cached groundY instead of reading blocks.
+     * Only the new fringe cells entering the range on each step need actual block reads.
+     *
+     * On flat terrain a 1-cell move refreshes ~13 fringe cells instead of ~104,
+     * cutting block I/O by ~85 %.
+     *
+     * Cache is evicted for cells that are now more than (maxMoves+2) Chebyshev steps
+     * from the player, keeping memory bounded.
+     */
     private static List<ReachableCell> floodFillReachable(World world, GridPlayerState state,
                                                           CollisionDetector collisionDetector,
                                                           UUID excludePlayer) {
+        int curX = state.currentGridX, curZ = state.currentGridZ;
+        float startY = state.npcY;
+
         List<ReachableCell> result = new ArrayList<>();
         Queue<BfsNode> queue = new LinkedList<>();
         Map<Long, Double> bestMoves = new HashMap<>();
-        Map<Long, Float> groundYCache = new HashMap<>();
 
-        float startY  = state.npcY;
-        long startKey = packKey(state.currentGridX, state.currentGridZ);
-
-        queue.add(new BfsNode(state.currentGridX, state.currentGridZ, state.remainingMoves, startY));
+        long startKey = packKey(curX, curZ);
+        queue.add(new BfsNode(curX, curZ, state.remainingMoves, startY));
         bestMoves.put(startKey, state.remainingMoves);
-        groundYCache.put(startKey, startY);
+        state.groundYCache.put(startKey, startY);   // cache player's own cell
 
         while (!queue.isEmpty() && result.size() < MAX_OVERLAY_CELLS) {
             BfsNode cur = queue.poll();
@@ -446,24 +499,36 @@ public class GridOverlayManager {
 
                 if (isBarrierCell(world, nx, nz, cur.groundY)) continue;
 
-                Float groundY = groundYCache.get(nKey);
+                // FIX 3: use cached groundY — skip block scan if we already know this cell
+                Float groundY = state.groundYCache.get(nKey);
                 if (groundY == null) {
                     groundY = scanForGround(world, nx, nz, cur.groundY + 6.0f);
                     if (groundY == null) groundY = scanForGround(world, nx, nz, state.npcY + 6.0f);
                     if (groundY == null) continue;
-                    groundYCache.put(nKey, groundY);
+                    state.groundYCache.put(nKey, groundY);   // cache for next move
                 }
 
                 float heightDiff = groundY - cur.groundY;
                 if (heightDiff >= MAX_HEIGHT_UP || heightDiff < -MAX_HEIGHT_DOWN) continue;
 
                 bestMoves.put(nKey, movesAfter);
-                if (nx != state.currentGridX || nz != state.currentGridZ) {
+                if (nx != curX || nz != curZ) {
                     if (prev == null) result.add(new ReachableCell(nx, nz, groundY));
                 }
                 queue.add(new BfsNode(nx, nz, movesAfter, groundY));
             }
         }
+
+        // Evict cells now far outside the possible range to keep cache bounded
+        int evictRadius = (int) Math.ceil(state.remainingMoves) + 4;
+        state.groundYCache.entrySet().removeIf(e -> {
+            long k = e.getKey();
+            int kx = (int)(k >> 32), kz = (int)(k & 0xFFFFFFFFL);
+            return Math.max(Math.abs(kx - curX), Math.abs(kz - curZ)) > evictRadius;
+        });
+
+        state.prevBfsX = curX;
+        state.prevBfsZ = curZ;
         return result;
     }
 

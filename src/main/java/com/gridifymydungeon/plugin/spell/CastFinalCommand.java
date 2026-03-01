@@ -451,29 +451,66 @@ public class CastFinalCommand extends AbstractPlayerCommand {
                         }
                     }
                 } else if (isAreaProjectile) {
-                    // BUG 4 FIX: CONE/LINE/WALL — fire ALL projectiles at the same time (no stagger).
-                    // Previously staggered 100ms per cell which made Burning_Hands look sequential.
-                    System.out.println("[Griddify] [PROJECTILE] Area projectile - firing " + fAffectedCells.size() + " cells simultaneously");
-                    for (SpellPatternCalculator.GridCell targetCell : fAffectedCells) {
-                        final double endX = targetCell.x * 2.0f + 1.0f;
-                        final double endY = fSt.npcY + 1.4;
-                        final double endZ = targetCell.z * 2.0f + 1.0f;
+                    // CONE/LINE/WALL spells: fire projectiles to each affected cell.
+                    // Burning_Hands: near→far staggered columns (wave of fire bolts).
+                    // Other CONE/LINE/WALL: all simultaneously.
+                    boolean isBurningHands = spellNameLower.contains("burning_hands");
 
-                        if (effectDelayMs > 0) {
+                    if (isBurningHands) {
+                        // Group cells by Chebyshev distance from caster — each distance = one column.
+                        // Fire each column 100ms after the previous to create a rolling fire-wave effect.
+                        java.util.TreeMap<Integer, java.util.List<SpellPatternCalculator.GridCell>> byDist =
+                                new java.util.TreeMap<>();
+                        int bhCasterGX = castState.getCasterGridX();
+                        int bhCasterGZ = castState.getCasterGridZ();
+                        for (SpellPatternCalculator.GridCell c : fAffectedCells) {
+                            int d = SpellPatternCalculator.getDistance(bhCasterGX, bhCasterGZ, c.x, c.z);
+                            byDist.computeIfAbsent(d, k -> new java.util.ArrayList<>()).add(c);
+                        }
+                        int colIndex = 0;
+                        System.out.println("[Griddify] [PROJECTILE] Burning_Hands wave - " + byDist.size() + " columns");
+                        for (java.util.List<SpellPatternCalculator.GridCell> col : byDist.values()) {
+                            final long colDelay = effectDelayMs + (colIndex * 100L);
+                            final java.util.List<SpellPatternCalculator.GridCell> fCol = col;
                             java.util.concurrent.Executors.newSingleThreadScheduledExecutor()
-                                    .schedule(() -> world.execute(() ->
-                                                    SpellVisualEffect.launchProjectile(
-                                                            projectileModel, projectileScale, world,
-                                                            startX, startY, startZ,
-                                                            endX, endY, endZ,
-                                                            fFaceYaw, 600L)),
-                                            effectDelayMs, java.util.concurrent.TimeUnit.MILLISECONDS);
-                        } else {
-                            SpellVisualEffect.launchProjectile(
-                                    projectileModel, projectileScale, world,
-                                    startX, startY, startZ,
-                                    endX, endY, endZ,
-                                    fFaceYaw, 600L);
+                                    .schedule(() -> world.execute(() -> {
+                                        for (SpellPatternCalculator.GridCell targetCell : fCol) {
+                                            final double endX = targetCell.x * 2.0f + 1.0f;
+                                            final double endY = fSt.npcY + 1.4;
+                                            final double endZ = targetCell.z * 2.0f + 1.0f;
+                                            SpellVisualEffect.launchProjectile(
+                                                    projectileModel, projectileScale, world,
+                                                    startX, startY, startZ,
+                                                    endX, endY, endZ,
+                                                    fFaceYaw, 400L); // shorter travel = snappier fire feel
+                                        }
+                                    }), colDelay, java.util.concurrent.TimeUnit.MILLISECONDS);
+                            colIndex++;
+                        }
+                    } else {
+                        // Other CONE/LINE/WALL: fire all simultaneously
+                        System.out.println("[Griddify] [PROJECTILE] Area projectile - firing " + fAffectedCells.size() + " cells simultaneously");
+                        for (SpellPatternCalculator.GridCell targetCell : fAffectedCells) {
+                            final double endX = targetCell.x * 2.0f + 1.0f;
+                            final double endY = fSt.npcY + 1.4;
+                            final double endZ = targetCell.z * 2.0f + 1.0f;
+
+                            if (effectDelayMs > 0) {
+                                java.util.concurrent.Executors.newSingleThreadScheduledExecutor()
+                                        .schedule(() -> world.execute(() ->
+                                                        SpellVisualEffect.launchProjectile(
+                                                                projectileModel, projectileScale, world,
+                                                                startX, startY, startZ,
+                                                                endX, endY, endZ,
+                                                                fFaceYaw, 600L)),
+                                                effectDelayMs, java.util.concurrent.TimeUnit.MILLISECONDS);
+                            } else {
+                                SpellVisualEffect.launchProjectile(
+                                        projectileModel, projectileScale, world,
+                                        startX, startY, startZ,
+                                        endX, endY, endZ,
+                                        fFaceYaw, 600L);
+                            }
                         }
                     }
                 } else {

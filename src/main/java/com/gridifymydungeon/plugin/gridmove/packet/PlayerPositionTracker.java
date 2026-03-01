@@ -150,10 +150,18 @@ public class PlayerPositionTracker {
                 // should stay frozen on the confirmed cells regardless of where they walk.
                 // EXCEPTION: for multi-target SINGLE_TARGET spells (e.g. Magic_Missile), allow
                 // continued aiming if there are still targets left to confirm.
+                // MELEE EXCEPTION: if out of range for melee (range<=1), freeze aim so the
+                // red overlay stays on the last valid cell — player can walk away but overlay holds.
                 boolean aimFrozen = castState.hasConfirmedCells();
                 if (aimFrozen && pattern == com.gridifymydungeon.plugin.spell.SpellPattern.SINGLE_TARGET
                         && !castState.hasAllTargets()) {
                     aimFrozen = false; // still need more targets — let player walk to next cell
+                }
+                // Melee out-of-range: freeze overlay at current aim (last valid cell)
+                if (!aimFrozen && castState.isOutOfRange()
+                        && pattern == com.gridifymydungeon.plugin.spell.SpellPattern.SINGLE_TARGET
+                        && castState.getSpell().getRangeGrids() <= 1) {
+                    aimFrozen = true; // keep red tile on last in-range position
                 }
                 if (state.getSpellCastingState() != null && !aimFrozen) {
                     castState.updatePlayerPosition(newGridX, newGridZ); // updates direction for CONE/LINE/WALL
@@ -252,25 +260,7 @@ public class PlayerPositionTracker {
         // During spell casting: NPC stays frozen, only the spell indicator moves (handled above)
         SpellCastingState castState = state.getSpellCastingState();
         if (castState != null && castState.isValid()) {
-            // BUG 5 FIX: For melee spells (SINGLE_TARGET with range <= 1), lock the player's
-            // physical movement so they can't walk beyond range from the NPC caster.
-            // This mirrors how Thunderwave/Burning_Hands lock the NPC in place.
-            // Non-melee spells (CONE, LINE, WALL, etc.) already handle movement freely.
-            com.gridifymydungeon.plugin.spell.SpellPattern castPattern = castState.getSpell().getPattern();
-            int castRange = castState.getSpell().getRangeGrids();
-            boolean isMeleeCast = (castPattern == com.gridifymydungeon.plugin.spell.SpellPattern.SINGLE_TARGET
-                    && castRange <= 1);
-            if (isMeleeCast) {
-                int distFromCaster = com.gridifymydungeon.plugin.spell.SpellPatternCalculator.getDistance(
-                        castState.getCasterGridX(), castState.getCasterGridZ(), newGridX, newGridZ);
-                if (distFromCaster > castRange) {
-                    playerRef.sendMessage(com.hypixel.hytale.server.core.Message.raw(
-                            "[Griddify] Melee range locked! Stay within " + castRange +
-                                    " grid(s) of your NPC to aim.").color("#FFA500"));
-                    return; // block the physical movement
-                }
-            }
-            // Don't move the NPC — just silently return; spell indicator already updated above
+            // Don't move the NPC — just silently return; spell indicator handled above
             return;
         }
 

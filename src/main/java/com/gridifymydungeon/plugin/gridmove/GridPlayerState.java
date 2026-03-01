@@ -49,31 +49,30 @@ public class GridPlayerState {
     // Character stats
     public CharacterStats stats;
 
-    // Direction holograms (WASD indicators)
-    public Ref<EntityStore> northHologram;
-    public Ref<EntityStore> southHologram;
-    public Ref<EntityStore> eastHologram;
-    public Ref<EntityStore> westHologram;
-    public Ref<EntityStore> northEastHologram;
-    public Ref<EntityStore> northWestHologram;
-    public Ref<EntityStore> southEastHologram;
-    public Ref<EntityStore> southWestHologram;
-
     // Grid overlay — movement range tiles (Grid_Basic / Grid_Player)
     public List<Ref<EntityStore>> gridOverlay = new ArrayList<>();
     public boolean gridOverlayEnabled = false;
     /** True when the overlay is the GM static /grid map, false when it's BFS range. */
     public boolean gmMapOverlayActive = false;
 
-    // FIX: Grid tile reuse map — tracks entities by grid coordinates for teleportation
-    // Key: "x,z" (e.g., "5,10"), Value: EntityStore Ref
+    // Active tile map: key="x,z", value=entity ref currently at that grid position
     public java.util.Map<String, Ref<EntityStore>> gridTileMap = new java.util.HashMap<>();
 
-    // FIX: Track NetworkIds for reused grid tiles (fog pattern)
-    // Key: "x,z", Value: NetworkId integer
+    // Legacy netId cache (kept for compatibility — now read directly from component)
     public java.util.Map<String, Integer> gridTileNetIds = new java.util.HashMap<>();
 
-    // FIX: Track if grid tiles have been hidden from other players (only hide once, not on every teleport)
+    // Pool of parked tiles sitting at y=-30, visible to owner, hidden from others.
+    // Populated when tiles leave BFS range. Consumed (teleported up) when new cells enter.
+    public java.util.List<Ref<EntityStore>> gridTilePool = new java.util.ArrayList<>();
+
+    // Per-cell ground-Y cache: avoids re-scanning blocks for cells seen before.
+    // Key: packKey(gridX,gridZ) long, Value: groundY float
+    public java.util.Map<Long, Float> groundYCache = new java.util.HashMap<>();
+
+    // Previous player BFS origin — detect which cells are brand-new this step
+    public int prevBfsX = Integer.MIN_VALUE;
+    public int prevBfsZ = Integer.MIN_VALUE;
+
     public boolean gridTilesHiddenFromOthers = false;
 
     // ── SPELL RANGE overlay — Grid_Range tiles shown during /cast ───────────

@@ -141,6 +141,69 @@ public class SpellVisualEffect {
         spawnWave(modelAssetId, entityScale, world, casterGridX, casterGridZ, npcY, cells, ignoredPlayers, 0f);
     }
 
+    /** Overload with configurable sweep count (default is 3 for Thunderwave). */
+    public static void spawnWave(String modelAssetId, float entityScale,
+                                 World world,
+                                 int casterGridX, int casterGridZ, float npcY,
+                                 Set<SpellPatternCalculator.GridCell> cells,
+                                 List<PlayerRef> ignoredPlayers,
+                                 float yawRad, int numSweeps) {
+        if (cells.isEmpty() || numSweeps <= 0) return;
+
+        // Exclude caster cell
+        Set<SpellPatternCalculator.GridCell> filteredCells = new java.util.HashSet<>();
+        for (SpellPatternCalculator.GridCell c : cells) {
+            if (c.x != casterGridX || c.z != casterGridZ) filteredCells.add(c);
+        }
+        if (filteredCells.isEmpty()) return;
+
+        float perpX = (float) Math.sin(yawRad + Math.PI / 2.0);
+        float perpZ = (float) Math.cos(yawRad + Math.PI / 2.0);
+
+        java.util.TreeMap<Integer, List<SpellPatternCalculator.GridCell>> byDist = new java.util.TreeMap<>();
+        for (SpellPatternCalculator.GridCell c : filteredCells) {
+            int d = SpellPatternCalculator.getDistance(casterGridX, casterGridZ, c.x, c.z);
+            byDist.computeIfAbsent(d, k -> new ArrayList<>()).add(c);
+        }
+        List<List<SpellPatternCalculator.GridCell>> columns = new ArrayList<>(byDist.values());
+        if (columns.isEmpty()) return;
+
+        int numCols     = columns.size();
+        long colStepMs  = 120L; // slightly faster per-column for fire cone feel
+        long waveLinger = 200L;
+        long sweepDur   = numCols * colStepMs + waveLinger;
+
+        final float fpX = perpX, fpZ = perpZ;
+
+        for (int sweep = 0; sweep < numSweeps; sweep++) {
+            long sweepStart = sweep * (sweepDur + 60L);
+
+            for (int ci = 0; ci < numCols; ci++) {
+                final List<SpellPatternCalculator.GridCell> col = columns.get(ci);
+                final long showAt = sweepStart + ci * colStepMs;
+                final long hideAt = showAt + waveLinger;
+
+                SCHED.schedule(() -> world.execute(() -> {
+                    List<Ref<EntityStore>> colRefs = new ArrayList<>();
+                    for (SpellPatternCalculator.GridCell c : col) {
+                        float wx = (c.x * 2.0f) + 1.0f;
+                        float wz = (c.z * 2.0f) + 1.0f;
+                        Float groundY = SpellVisualManager.scanForGround(world, c.x, c.z, npcY + 30f, 45);
+                        float wy = (groundY != null ? groundY : npcY) + 0.5f;
+                        for (float sign : new float[]{-0.5f, 0.5f}) {
+                            Ref<EntityStore> ref = spawnStationary(modelAssetId, entityScale, world,
+                                    wx + fpX * sign, wy, wz + fpZ * sign, yawRad);
+                            if (ref != null) colRefs.add(ref);
+                        }
+                    }
+                    SCHED.schedule(() -> world.execute(() -> {
+                        for (Ref<EntityStore> r : colRefs) despawn(world, r);
+                    }), waveLinger, TimeUnit.MILLISECONDS);
+                }), showAt, TimeUnit.MILLISECONDS);
+            }
+        }
+    }
+
     public static void spawnWave(String modelAssetId, float entityScale,
                                  World world,
                                  int casterGridX, int casterGridZ, float npcY,
@@ -349,10 +412,10 @@ public class SpellVisualEffect {
      * Must be called inside world.execute().
      */
     public static void launchProjectile(String modelAssetId, float entityScale,
-                                       World world,
-                                       double startX, double startY, double startZ,
-                                       double endX, double endY, double endZ,
-                                       float yaw, long durationMs) {
+                                        World world,
+                                        double startX, double startY, double startZ,
+                                        double endX, double endY, double endZ,
+                                        float yaw, long durationMs) {
         Model model = getModel(modelAssetId, entityScale);
         if (model == null) return;
 
