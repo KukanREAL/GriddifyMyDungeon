@@ -269,11 +269,13 @@ public class SpellVisualManager {
         Store<EntityStore> store = world.getEntityStore().getStore();
         List<Ref<EntityStore>> refs = new ArrayList<>();
 
-        // Ring of cells at exactly rangeGrids Chebyshev distance
+        // BUG 1 FIX: Fill the ENTIRE reachable area, not just the outer ring.
+        // Every cell within spell range (excluding caster's own cell) gets a tile.
         for (int dx = -rangeGrids; dx <= rangeGrids; dx++) {
             for (int dz = -rangeGrids; dz <= rangeGrids; dz++) {
                 int chebyshev = Math.max(Math.abs(dx), Math.abs(dz));
-                if (chebyshev != rangeGrids) continue; // only the outer ring
+                if (chebyshev == 0) continue;             // skip caster's own cell
+                if (chebyshev > rangeGrids) continue;     // outside range
 
                 int gx = casterGridX + dx;
                 int gz = casterGridZ + dz;
@@ -296,13 +298,14 @@ public class SpellVisualManager {
 
         playerRangeVisuals.put(playerUUID, refs);
 
-        // FIX #1: Hide from non-owners after entity-tracker has had time to broadcast
+        // BUG 1 FIX: Hide from non-owners 300ms after spawn.
+        // 300ms gives entity-tracker time to broadcast spawns to nearby players FIRST.
         if (owner != null) {
             final List<Ref<EntityStore>> finalRefs = refs;
             final PlayerRef finalOwner = owner;
             SCHED.schedule(() -> world.execute(() ->
                     hideRefsFromOthers(world, finalRefs, finalOwner)
-            ), 150L, TimeUnit.MILLISECONDS);
+            ), 300L, TimeUnit.MILLISECONDS);
         }
 
         System.out.println("[Griddify] [RANGE] Range ring: " + refs.size() + " tiles at radius " + rangeGrids);
@@ -463,8 +466,14 @@ public class SpellVisualManager {
         modelLoadAttempted = true;
         cachedSpellModel = loadModel(SPELL_MODEL_ID);
         cachedRangeModel = loadModel(RANGE_MODEL_ID);
+        // BUG 1 FIX: robust fallback — Grid_Spell and Grid_Range each fall back to Grid_Basic
+        // so range tiles always appear even if the dedicated models are missing
         if (cachedSpellModel == null) cachedSpellModel = loadModel(FALLBACK_MODEL_ID);
+        if (cachedRangeModel == null) cachedRangeModel = loadModel(FALLBACK_MODEL_ID);
         if (cachedRangeModel == null) cachedRangeModel = cachedSpellModel;
+        System.out.println("[Griddify] [SPELL] Models — spell=" +
+                (cachedSpellModel != null ? "OK" : "NULL") +
+                " range=" + (cachedRangeModel != null ? "OK" : "NULL"));
     }
 
     private static Model loadModel(String id) {

@@ -69,6 +69,10 @@ public class GridPlayerState {
     // Key: "x,z" (e.g., "5,10"), Value: EntityStore Ref
     public java.util.Map<String, Ref<EntityStore>> gridTileMap = new java.util.HashMap<>();
 
+    // FIX: Track NetworkIds for reused grid tiles (fog pattern)
+    // Key: "x,z", Value: NetworkId integer
+    public java.util.Map<String, Integer> gridTileNetIds = new java.util.HashMap<>();
+
     // FIX: Track if grid tiles have been hidden from other players (only hide once, not on every teleport)
     public boolean gridTilesHiddenFromOthers = false;
 

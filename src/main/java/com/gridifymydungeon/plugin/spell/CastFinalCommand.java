@@ -305,26 +305,42 @@ public class CastFinalCommand extends AbstractPlayerCommand {
         final float fTargetWZ     = targetWZ;
         final Set<SpellPatternCalculator.GridCell> fAffectedCells = affectedCells;
 
-        // FIX: Weapon-type detection and effect delays
-        String spellName = spell.getName();
-        boolean isBowShot = spellName.equalsIgnoreCase("Bow_Shot");
-        boolean isStaffWeapon = spellName.toLowerCase().contains("staff");
-        boolean isSpellbookWeapon = spellName.toLowerCase().contains("spellbook") ||
-                                    (spell.getPattern() == SpellPattern.CONE ||
-                                     spell.getPattern() == SpellPattern.WALL ||
-                                     spell.getPattern() == SpellPattern.LINE);
+        // BUG 3 FIX: Capture the raw confirmed-targets LIST (allows same-cell duplicates).
+        // affectedCells is a HashSet which deduplicates by (x,z), so hitting the same cell
+        // 3 times would only produce 1 projectile. The raw list preserves all 3 entries.
+        final java.util.List<SpellPatternCalculator.GridCell> fTargetList;
+        if (spell.isMultiTarget() && !castState.getConfirmedTargets().isEmpty()) {
+            java.util.List<SpellPatternCalculator.GridCell> tl = new java.util.ArrayList<>();
+            for (SpellCastingState.GridCell c : castState.getConfirmedTargets()) {
+                tl.add(new SpellPatternCalculator.GridCell(c.x, c.z));
+            }
+            fTargetList = tl;
+        } else {
+            fTargetList = null; // non-multi-target: use fAffectedCells
+        }
 
-        long effectDelayMs = isBowShot ? 2500L : (isStaffWeapon || isSpellbookWeapon ? 2000L : 0L);
+        // BUG 4 FIX: Detect weapon from storedRightHand item ID, NOT spell name.
+        // Generic spells (Fireball, Cure_Wounds, etc.) have no "staff"/"spellbook" in their name,
+        // so the old name-based detection always fell through to the default animation.
+        // storedRightHand is e.g. "weapon_staff_oak", "weapon_spellbook_arcane", "weapon_shortbow_simple"
+        String spellName = spell.getName();
+        String rightHandId = state.storedRightHand != null ? state.storedRightHand.toLowerCase() : "";
+        boolean isBowShot         = spellName.equalsIgnoreCase("Bow_Shot");
+        boolean isStaffWeapon     = rightHandId.startsWith("weapon_staff");
+        boolean isSpellbookWeapon = rightHandId.startsWith("weapon_spellbook");
+
+        long effectDelayMs = isBowShot ? 2500L : (isStaffWeapon || isSpellbookWeapon ? 1300L : 0L); // BUG 3 FIX: was 2000ms, -700ms
 
         world.execute(() -> {
             // FIX 2: Rotate NPC to face the target (for bow, rotate immediately so it faces during draw)
             PlayerEntityController.setNpcYaw(world, fSt, fFaceYaw);
 
-            // FIX 4: Play cast animation with itemAnimationsId
-            String[] anim = pickCastAnimation(spell);
+            // BUG 4 FIX: Pass rightHand so animation is picked from equipped weapon
+            String[] anim = pickCastAnimation(spell, fSt.storedRightHand);
             String animationId = anim[0];
             String itemAnimationsId = anim[1];
-            System.out.println("[Griddify] [CASTFINAL] Playing animation: " + animationId + " with item: " + itemAnimationsId);
+            System.out.println("[Griddify] [CASTFINAL] anim=" + animationId
+                    + " itemAnim=" + itemAnimationsId + " rightHand=" + fSt.storedRightHand);
             PlayerEntityController.playNpcAnimation(world, fSt, animationId, itemAnimationsId);
 
             // Auto-stop animation after delay (for staff/spellbook, stop after 5000ms)
@@ -340,10 +356,10 @@ public class CastFinalCommand extends AbstractPlayerCommand {
 
             // Check if this is a wave-based spell (Thunderwave, Entangle, Moonbeam, etc.)
             boolean isWaveSpell = spellNameLower.contains("thunderwave") ||
-                                 spellNameLower.contains("entangle") ||
-                                 spellNameLower.contains("moonbeam") ||
-                                 spellNameLower.contains("sunbeam") ||
-                                 spellNameLower.contains("ice_storm");
+                    spellNameLower.contains("entangle") ||
+                    spellNameLower.contains("moonbeam") ||
+                    spellNameLower.contains("sunbeam") ||
+                    spellNameLower.contains("ice_storm");
 
             if (isWaveSpell) {
                 // Spawn wave effect for these spells instead of projectiles
@@ -357,7 +373,7 @@ public class CastFinalCommand extends AbstractPlayerCommand {
                     if (effectDelayMs > 0) {
                         java.util.concurrent.Executors.newSingleThreadScheduledExecutor()
                                 .schedule(() -> world.execute(() ->
-                                        SpellVisualEffect.spawnEntangle(world, fAffectedCells, fSt.npcY)),
+                                                SpellVisualEffect.spawnEntangle(world, fAffectedCells, fSt.npcY)),
                                         effectDelayMs, java.util.concurrent.TimeUnit.MILLISECONDS);
                     } else {
                         SpellVisualEffect.spawnEntangle(world, fAffectedCells, fSt.npcY);
@@ -366,7 +382,7 @@ public class CastFinalCommand extends AbstractPlayerCommand {
                     if (effectDelayMs > 0) {
                         java.util.concurrent.Executors.newSingleThreadScheduledExecutor()
                                 .schedule(() -> world.execute(() ->
-                                        SpellVisualEffect.spawnIceStorm(world, fAffectedCells, fSt.npcY, ignored)),
+                                                SpellVisualEffect.spawnIceStorm(world, fAffectedCells, fSt.npcY, ignored)),
                                         effectDelayMs, java.util.concurrent.TimeUnit.MILLISECONDS);
                     } else {
                         SpellVisualEffect.spawnIceStorm(world, fAffectedCells, fSt.npcY, ignored);
@@ -376,7 +392,7 @@ public class CastFinalCommand extends AbstractPlayerCommand {
                     if (effectDelayMs > 0) {
                         java.util.concurrent.Executors.newSingleThreadScheduledExecutor()
                                 .schedule(() -> world.execute(() ->
-                                        SpellVisualEffect.spawnWave(spellName, 1.0f, world, casterGX, casterGZ, fSt.npcY, fAffectedCells, ignored, fFaceYaw)),
+                                                SpellVisualEffect.spawnWave(spellName, 1.0f, world, casterGX, casterGZ, fSt.npcY, fAffectedCells, ignored, fFaceYaw)),
                                         effectDelayMs, java.util.concurrent.TimeUnit.MILLISECONDS);
                     } else {
                         SpellVisualEffect.spawnWave(spellName, 1.0f, world, casterGX, casterGZ, fSt.npcY, fAffectedCells, ignored, fFaceYaw);
@@ -401,13 +417,18 @@ public class CastFinalCommand extends AbstractPlayerCommand {
 
                 // Special case: CONE/LINE/WALL spells (like Burning_Hands) fire projectiles to each affected cell
                 boolean isAreaProjectile = (spellPattern == SpellPattern.CONE ||
-                                           spellPattern == SpellPattern.LINE ||
-                                           spellPattern == SpellPattern.WALL);
+                        spellPattern == SpellPattern.LINE ||
+                        spellPattern == SpellPattern.WALL);
 
                 if (isMagicMissile) {
-                    // BUG FIX: Magic_Missile fires 1 projectile per target, not 3
-                    System.out.println("[Griddify] [PROJECTILE] Magic_Missile - firing 1 per target");
-                    for (SpellPatternCalculator.GridCell targetCell : fAffectedCells) {
+                    // BUG 3 FIX: Use fTargetList (raw confirmed list, allows same-cell duplicates).
+                    // If the player targeted the same cell 3x, fire 3 projectiles.
+                    java.util.List<SpellPatternCalculator.GridCell> missiles =
+                            (fTargetList != null && !fTargetList.isEmpty())
+                                    ? fTargetList
+                                    : new java.util.ArrayList<>(fAffectedCells);
+                    System.out.println("[Griddify] [PROJECTILE] Magic_Missile - firing " + missiles.size() + " dart(s)");
+                    for (SpellPatternCalculator.GridCell targetCell : missiles) {
                         final double endX = targetCell.x * 2.0f + 1.0f;
                         final double endY = fSt.npcY + 1.4;
                         final double endZ = targetCell.z * 2.0f + 1.0f;
@@ -415,11 +436,11 @@ public class CastFinalCommand extends AbstractPlayerCommand {
                         if (effectDelayMs > 0) {
                             java.util.concurrent.Executors.newSingleThreadScheduledExecutor()
                                     .schedule(() -> world.execute(() ->
-                                            SpellVisualEffect.launchProjectile(
-                                                    projectileModel, projectileScale, world,
-                                                    startX, startY, startZ,
-                                                    endX, endY, endZ,
-                                                    fFaceYaw, 600L)),
+                                                    SpellVisualEffect.launchProjectile(
+                                                            projectileModel, projectileScale, world,
+                                                            startX, startY, startZ,
+                                                            endX, endY, endZ,
+                                                            fFaceYaw, 600L)),
                                             effectDelayMs, java.util.concurrent.TimeUnit.MILLISECONDS);
                         } else {
                             SpellVisualEffect.launchProjectile(
@@ -430,36 +451,29 @@ public class CastFinalCommand extends AbstractPlayerCommand {
                         }
                     }
                 } else if (isAreaProjectile) {
-                    // CONE/LINE/WALL: Fire projectile to each affected cell (e.g., Burning_Hands)
-                    System.out.println("[Griddify] [PROJECTILE] Area projectile - firing to " + fAffectedCells.size() + " cells");
-                    int cellIndex = 0;
+                    // BUG 4 FIX: CONE/LINE/WALL — fire ALL projectiles at the same time (no stagger).
+                    // Previously staggered 100ms per cell which made Burning_Hands look sequential.
+                    System.out.println("[Griddify] [PROJECTILE] Area projectile - firing " + fAffectedCells.size() + " cells simultaneously");
                     for (SpellPatternCalculator.GridCell targetCell : fAffectedCells) {
                         final double endX = targetCell.x * 2.0f + 1.0f;
                         final double endY = fSt.npcY + 1.4;
                         final double endZ = targetCell.z * 2.0f + 1.0f;
 
-                        long launchDelay = effectDelayMs + (cellIndex * 100L); // Stagger by 100ms each
-                        cellIndex++;
-
                         if (effectDelayMs > 0) {
                             java.util.concurrent.Executors.newSingleThreadScheduledExecutor()
                                     .schedule(() -> world.execute(() ->
-                                            SpellVisualEffect.launchProjectile(
-                                                    projectileModel, projectileScale, world,
-                                                    startX, startY, startZ,
-                                                    endX, endY, endZ,
-                                                    fFaceYaw, 600L)),
-                                            launchDelay, java.util.concurrent.TimeUnit.MILLISECONDS);
+                                                    SpellVisualEffect.launchProjectile(
+                                                            projectileModel, projectileScale, world,
+                                                            startX, startY, startZ,
+                                                            endX, endY, endZ,
+                                                            fFaceYaw, 600L)),
+                                            effectDelayMs, java.util.concurrent.TimeUnit.MILLISECONDS);
                         } else {
-                            // Immediate launch with slight stagger
-                            java.util.concurrent.Executors.newSingleThreadScheduledExecutor()
-                                    .schedule(() -> world.execute(() ->
-                                            SpellVisualEffect.launchProjectile(
-                                                    projectileModel, projectileScale, world,
-                                                    startX, startY, startZ,
-                                                    endX, endY, endZ,
-                                                    fFaceYaw, 600L)),
-                                            cellIndex * 100L, java.util.concurrent.TimeUnit.MILLISECONDS);
+                            SpellVisualEffect.launchProjectile(
+                                    projectileModel, projectileScale, world,
+                                    startX, startY, startZ,
+                                    endX, endY, endZ,
+                                    fFaceYaw, 600L);
                         }
                     }
                 } else {
@@ -473,11 +487,11 @@ public class CastFinalCommand extends AbstractPlayerCommand {
                     if (effectDelayMs > 0) {
                         java.util.concurrent.Executors.newSingleThreadScheduledExecutor()
                                 .schedule(() -> world.execute(() ->
-                                        SpellVisualEffect.launchProjectile(
-                                                projectileModel, projectileScale, world,
-                                                startX, startY, startZ,
-                                                endX, endY, endZ,
-                                                fFaceYaw, 600L)),
+                                                SpellVisualEffect.launchProjectile(
+                                                        projectileModel, projectileScale, world,
+                                                        startX, startY, startZ,
+                                                        endX, endY, endZ,
+                                                        fFaceYaw, 600L)),
                                         effectDelayMs, java.util.concurrent.TimeUnit.MILLISECONDS);
                     } else {
                         SpellVisualEffect.launchProjectile(
@@ -552,51 +566,51 @@ public class CastFinalCommand extends AbstractPlayerCommand {
     // ── Helpers ──────────────────────────────────────────────────────────────────
 
     /**
-     * BUG FIX 5: Pick animation asset ID and itemAnimationsId based on weapon/spell type.
-     * Returns [animationId, itemAnimationsId].
-     * Fixed to use full animation names (e.g., "CastSummonCharging") with null itemAnimationsId.
+     * BUG 4 FIX: Pick NPC cast animation based on the EQUIPPED WEAPON (rightHandId item ID),
+     * not the spell name. Generic spells like "Fireball" or "Cure_Wounds" don't contain
+     * "staff" or "spellbook" so name-based detection always fell to the default case.
+     *
+     * itemAnimationsId meanings:
+     *   null         = base character animation (CastSummonCharging, CastHurlCharging, ShootCharging)
+     *   "Longsword"  = longsword weapon-overlay animation set (SwingRight, SwingLeft, SwingUpLeft)
+     *   "Default"    = unarmed / default weapon-overlay animation set (SwingLeft)
+     *
+     * @param spell       the spell being cast
+     * @param rightHandId state.storedRightHand — the item ID of the equipped weapon, may be null
+     * @return {animationId, itemAnimationsId}
      */
-    private static String[] pickCastAnimation(SpellData spell) {
-        String spellName = spell.getName();
-        SpellPattern pattern = spell.getPattern();
+    private static String[] pickCastAnimation(SpellData spell, String rightHandId) {
+        String sn = spell.getName().toLowerCase();
+        String rh = rightHandId != null ? rightHandId.toLowerCase() : "";
 
-        // Check weapon type by spell name
-        boolean isBowShot = spellName.equalsIgnoreCase("Bow_Shot");
-        boolean isStaffWeapon = spellName.toLowerCase().contains("staff");
-        boolean isSpellbookWeapon = spellName.toLowerCase().contains("spellbook") ||
-                                    (pattern == SpellPattern.CONE || pattern == SpellPattern.WALL || pattern == SpellPattern.LINE);
+        // ── Explicit per-spell overrides (melee weapon spells keyed by spell name) ──────
+        if (sn.equals("sword_swing"))       return new String[]{"SwingRight",       "Longsword"};
+        if (sn.equals("paladin_strike"))     return new String[]{"SwingUpLeft",      "Longsword"};
+        if (sn.equals("sneak_stab"))         return new String[]{"SwingLeft",        "Longsword"};
+        if (sn.equals("pact_blade"))         return new String[]{"SwingUpLeft",      "Longsword"};
+        if (sn.equals("greataxe_swing"))     return new String[]{"SwingRight",       "Longsword"};
+        if (sn.equals("shortsword_slash"))   return new String[]{"SwingLeft",        "Longsword"};
+        if (sn.equals("morningstar_strike")) return new String[]{"SwingRight",       "Longsword"};
+        if (sn.equals("staff_strike"))       return new String[]{"SwingLeft",        "Default"};
+        if (sn.equals("quarterstaff"))       return new String[]{"SwingLeft",        "Default"};
+        if (sn.equals("unarmed_strike"))     return new String[]{"SwingLeft",        "Default"};
+        if (sn.equals("dagger_throw"))       return new String[]{"SwingRight",       "Default"};
+        if (sn.equals("bow_shot"))           return new String[]{"ShootCharging",    null};
 
-        // Bow Shot: full animation name with null itemAnimationsId (base character animation)
-        if (isBowShot) {
-            return new String[]{"ShootCharging", null};
-        }
+        // ── Detect from equipped weapon item ID ──────────────────────────────────────────
+        // This is the primary fix: ANY spell cast while holding a staff plays the staff anim
+        if (rh.startsWith("weapon_staff"))         return new String[]{"CastSummonCharging", null};
+        if (rh.startsWith("weapon_spellbook"))     return new String[]{"CastHurlCharging",   null};
+        if (rh.startsWith("weapon_shortbow")
+                || rh.startsWith("weapon_longbow")) return new String[]{"ShootCharging",      null};
+        if (rh.startsWith("weapon_longsword")
+                || rh.startsWith("weapon_shortsword")
+                || rh.startsWith("weapon_rapier")
+                || rh.startsWith("weapon_greataxe")
+                || rh.startsWith("weapon_morningstar"))
+            return new String[]{"SwingRight",          "Longsword"};
 
-        // Staff weapon: full animation name with null itemAnimationsId
-        if (isStaffWeapon) {
-            return new String[]{"CastSummonCharging", null};
-        }
-
-        // Spellbook weapon: full animation name with null itemAnimationsId
-        if (isSpellbookWeapon) {
-            return new String[]{"CastHurlCharging", null};
-        }
-
-        // Longsword: "SwingRight" with "Longsword" itemAnimationsId (unchanged)
-        if (spell.getDamageType() == DamageType.SLASHING) {
-            return new String[]{"SwingRight", "Longsword"};
-        }
-
-        // Unarmed: "SwingLeft" with "Default" itemAnimationsId (unchanged)
-        if (spellName.equalsIgnoreCase("Unarmed_Strike")) {
-            return new String[]{"SwingLeft", "Default"};
-        }
-
-        // Healing spells: full animation name with null itemAnimationsId
-        if (spell.isHealingSpell()) {
-            return new String[]{"CastSummonCharging", null};
-        }
-
-        // Generic magic spells: full animation name with null itemAnimationsId
+        // ── Fallback: generic hurl for bare-handed or unknown equipment ─────────────────
         return new String[]{"CastHurlCharging", null};
     }
 
@@ -614,8 +628,8 @@ public class CastFinalCommand extends AbstractPlayerCommand {
 
         // Fire spells → Fire_Bolt
         if (spellName.contains("fire_bolt") || spellName.contains("produce_flame") ||
-            spellName.contains("fireball") || spellName.contains("meteor") ||
-            spellName.contains("burning_hands")) {
+                spellName.contains("fireball") || spellName.contains("meteor") ||
+                spellName.contains("burning_hands")) {
             if (spellName.contains("produce_flame")) return new String[]{"Fire_Bolt", "0.8"};
             if (spellName.contains("quickened_fireball")) return new String[]{"Fire_Bolt", "2.0"};
             if (spellName.contains("delayed_blast")) return new String[]{"Fire_Bolt", "3.0"};
@@ -627,7 +641,7 @@ public class CastFinalCommand extends AbstractPlayerCommand {
 
         // Cold spells → Frost_Bolt
         if (spellName.contains("cone_of_cold") || spellName.contains("ice_storm") ||
-            spellName.contains("dragonfrost")) {
+                spellName.contains("dragonfrost")) {
             if (spellName.contains("ice_storm")) return new String[]{"Frost_Bolt", "0.9"};
             return new String[]{"Frost_Bolt", "1.3"};
         }
@@ -649,7 +663,7 @@ public class CastFinalCommand extends AbstractPlayerCommand {
 
         // Acid → Acid_Bolt
         if (spellName.contains("sneak") || spellName.contains("dagger") ||
-            spellName.contains("shortsword")) {
+                spellName.contains("shortsword")) {
             return new String[]{"Acid_Bolt", "0.7"};
         }
 
@@ -660,19 +674,19 @@ public class CastFinalCommand extends AbstractPlayerCommand {
 
         // Necrotic → Crimson_Spell
         if (spellName.contains("soul") || spellName.contains("hadar") ||
-            spellName.contains("hunger")) {
+                spellName.contains("hunger")) {
             return new String[]{"Crimson_Spell", "1.5"};
         }
 
         // Arcane/Force/Radiant → Arcane_Bolt
         if (spellName.contains("arcane") || spellName.contains("eldritch") ||
-            spellName.contains("sacred") || spellName.contains("divine") ||
-            spellName.contains("spiritual") || spellName.contains("radiant") ||
-            spellName.contains("psychic") || spellName.contains("prismatic") ||
-            spellName.contains("staff_strike") || spellName.contains("unarmed") ||
-            spellName.contains("power_strike") || spellName.contains("cleave") ||
-            spellName.contains("whirlwind") || spellName.contains("flurry") ||
-            spellName.contains("sword_swing")) {
+                spellName.contains("sacred") || spellName.contains("divine") ||
+                spellName.contains("spiritual") || spellName.contains("radiant") ||
+                spellName.contains("psychic") || spellName.contains("prismatic") ||
+                spellName.contains("staff_strike") || spellName.contains("unarmed") ||
+                spellName.contains("power_strike") || spellName.contains("cleave") ||
+                spellName.contains("whirlwind") || spellName.contains("flurry") ||
+                spellName.contains("sword_swing")) {
             if (spellName.contains("psychic_blast")) return new String[]{"Arcane_Bolt", "2.5"};
             if (spellName.contains("prismatic")) return new String[]{"Arcane_Bolt", "2.0"};
             if (spellName.contains("staff_strike")) return new String[]{"Arcane_Bolt", "0.8"};
