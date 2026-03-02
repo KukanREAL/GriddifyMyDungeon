@@ -112,8 +112,16 @@ public class SpellVisualManager {
         }
 
         float referenceY = resolveNpcY(playerUUID, playerY);
+        // Park 30 units below the player's feet — always outside tracker range of nearby players.
+        final float parkedY = referenceY - 30f;
+        // Cluster parked tiles at the player's XZ so they don't scatter underground.
+        GridPlayerState _gps = resolveState(playerUUID);
+        float parkedX = (_gps != null) ? (_gps.currentGridX * 2.0f) + 1.0f : 0f;
+        float parkedZ = (_gps != null) ? (_gps.currentGridZ * 2.0f) + 1.0f : 0f;
+
         List<Ref<EntityStore>> newVisuals = new ArrayList<>();
         Store<EntityStore> store = world.getEntityStore().getStore();
+        List<Ref<EntityStore>> pool = playerSpellPool.computeIfAbsent(playerUUID, k -> new ArrayList<>());
 
         for (SpellPatternCalculator.GridCell cell : cells) {
             float cx = (cell.x * 2.0f) + 1.0f;
@@ -121,17 +129,28 @@ public class SpellVisualManager {
 
             Float groundY = MonsterEntityController.scanForGroundPublic(world, cell.x, cell.z, referenceY + 3.0f);
             if (groundY == null) groundY = referenceY;
-
             float targetY = groundY + SPELL_Y_OFFSET;
 
-            // FIX #2: Spawn at y=-30 (invisible to all), then teleport to real Y
-            Ref<EntityStore> ref = (owner != null)
-                    ? spawnTile(store, model, cx, -30f, cz)
-                    : spawnTile(store, model, cx, targetY, cz);
-            if (ref == null) continue;
+            Ref<EntityStore> ref = null;
+            // Try to recycle a pooled tile (already hidden from others)
+            while (!pool.isEmpty()) {
+                Ref<EntityStore> candidate = pool.remove(pool.size() - 1);
+                if (candidate != null && candidate.isValid()) { ref = candidate; break; }
+            }
 
-            // Teleport to real position if spawned privately
-            if (owner != null) {
+            if (ref != null) {
+                // Recycled — already hidden, just teleport to real Y
+                try {
+                    TransformComponent tc = store.getComponent(ref, TransformComponent.getComponentType());
+                    if (tc != null) tc.setPosition(new Vector3d(cx, targetY, cz));
+                } catch (Exception ignored) {}
+            } else {
+                // Fresh spawn: born below player → hide immediately → teleport to real Y.
+                // Other players receive the remove-packet while tile is underground,
+                // so they never see it appear at ground level.
+                ref = spawnTile(store, model, parkedX, parkedY, parkedZ);
+                if (ref == null) continue;
+                if (owner != null) hideRefFromOthers(store, world, ref, owner);
                 try {
                     TransformComponent tc = store.getComponent(ref, TransformComponent.getComponentType());
                     if (tc != null) tc.setPosition(new Vector3d(cx, targetY, cz));
@@ -143,27 +162,33 @@ public class SpellVisualManager {
 
         playerSpellVisuals.put(playerUUID, newVisuals);
 
-        // FIX #2: Hide from non-owners after entity-tracker has had time to broadcast
-        if (owner != null) {
-            final List<Ref<EntityStore>> finalRefs = newVisuals;
-            final PlayerRef finalOwner = owner;
-            SCHED.schedule(() -> world.execute(() ->
-                    hideRefsFromOthers(world, finalRefs, finalOwner)
-            ), 150L, TimeUnit.MILLISECONDS);
+        // For wide spells (>45° arc) pre-load the pool so the NEXT showSpellArea call
+        // can recycle immediately instead of spawning fresh tiles.
+        if (owner != null && angularSpread(cells) > 45.0) {
+            preloadSpellPool(playerUUID, cells.size(), model, store, world, owner, parkedX, parkedY, parkedZ);
         }
 
-        System.out.println("[Griddify] [SPELL] Spell overlay: " + cells.size() +
-                " cells → " + newVisuals.size() + " placed" + (owner != null ? " (private)" : ""));
+        System.out.println("[Griddify] [SPELL] Spell overlay: " + cells.size()
+                + " cells placed (spawn-hide-teleport)" + (owner != null ? " (private)" : ""));
     }
 
     public void clearSpellVisuals(UUID playerUUID, World world) {
         List<Ref<EntityStore>> visuals = playerSpellVisuals.remove(playerUUID);
         if (visuals == null) return;
         Store<EntityStore> store = world.getEntityStore().getStore();
+        GridPlayerState _gps = resolveState(playerUUID);
+        float parkedY = (_gps != null) ? _gps.npcY - 30f : -30f;
+        float parkedX = (_gps != null) ? (_gps.currentGridX * 2.0f) + 1.0f : 0f;
+        float parkedZ = (_gps != null) ? (_gps.currentGridZ * 2.0f) + 1.0f : 0f;
+        List<Ref<EntityStore>> pool = playerSpellPool.computeIfAbsent(playerUUID, k -> new ArrayList<>());
         for (Ref<EntityStore> ref : visuals) {
-            if (ref != null && ref.isValid()) {
-                try { store.removeEntity(ref, RemoveReason.REMOVE); } catch (Exception ignored) {}
-            }
+            if (ref == null || !ref.isValid()) continue;
+            // Tile is already hidden from non-owners — just park below player for reuse.
+            try {
+                TransformComponent tc = store.getComponent(ref, TransformComponent.getComponentType());
+                if (tc != null) tc.setPosition(new Vector3d(parkedX, parkedY, parkedZ));
+            } catch (Exception ignored) {}
+            pool.add(ref);
         }
         visuals.clear();
     }
@@ -217,16 +242,27 @@ public class SpellVisualManager {
         if (model == null) return;
 
         float referenceY = resolveNpcY(playerUUID, refY);
+        GridPlayerState _gps = resolveState(playerUUID);
+        float parkedY = (_gps != null) ? _gps.npcY - 30f : referenceY - 30f;
+        float parkedX = (_gps != null) ? (_gps.currentGridX * 2.0f) + 1.0f : 0f;
+        float parkedZ = (_gps != null) ? (_gps.currentGridZ * 2.0f) + 1.0f : 0f;
+
         Float groundY = MonsterEntityController.scanForGroundPublic(world, cell.x, cell.z, referenceY + 3.0f);
         if (groundY == null) groundY = referenceY;
 
         float cx = (cell.x * 2.0f) + 1.0f;
         float cz = (cell.z * 2.0f) + 1.0f;
-        float y  = groundY + 0.03f + (hitIndex * 0.01f); // slightly higher per stack
+        float targetY = groundY + 0.03f + (hitIndex * 0.01f);
 
         Store<EntityStore> store = world.getEntityStore().getStore();
-        Ref<EntityStore> ref = spawnTile(store, model, cx, y, cz);
+        // Spawn below player → tile is underground when tracker broadcasts it → no one sees it there.
+        // Move immediately to real Y (no explicit hide needed — underground spawn is invisible).
+        Ref<EntityStore> ref = spawnTile(store, model, parkedX, parkedY, parkedZ);
         if (ref != null) {
+            try {
+                TransformComponent tc = store.getComponent(ref, TransformComponent.getComponentType());
+                if (tc != null) tc.setPosition(new Vector3d(cx, targetY, cz));
+            } catch (Exception ignored) {}
             playerSpellVisuals.computeIfAbsent(playerUUID, k -> new ArrayList<>()).add(ref);
         }
     }
@@ -303,46 +339,64 @@ public class SpellVisualManager {
         Store<EntityStore> store = world.getEntityStore().getStore();
         List<Ref<EntityStore>> refs = new ArrayList<>();
 
-        // BUG 1 FIX: Fill the ENTIRE reachable area, not just the outer ring.
-        // Every cell within spell range (excluding caster's own cell) gets a tile.
+        // Park 30 units below the caster's feet — outside tracker range of other players.
+        final float parkedY = npcY - 30f;
+        float parkedX = (casterGridX * 2.0f) + 1.0f;
+        float parkedZ = (casterGridZ * 2.0f) + 1.0f;
+        List<Ref<EntityStore>> pool = playerRangePool.computeIfAbsent(playerUUID, k -> new ArrayList<>());
+
         for (int dx = -rangeGrids; dx <= rangeGrids; dx++) {
             for (int dz = -rangeGrids; dz <= rangeGrids; dz++) {
                 int chebyshev = Math.max(Math.abs(dx), Math.abs(dz));
-                if (chebyshev == 0) continue;             // skip caster's own cell
-                if (chebyshev > rangeGrids) continue;     // outside range
+                if (chebyshev == 0) continue;
+                if (chebyshev > rangeGrids) continue;
 
                 int gx = casterGridX + dx;
                 int gz = casterGridZ + dz;
-
                 float cx = (gx * 2.0f) + 1.0f;
                 float cz2 = (gz * 2.0f) + 1.0f;
 
                 Float groundY = MonsterEntityController.scanForGroundPublic(world, gx, gz, npcY + 3.0f);
                 if (groundY == null) groundY = npcY;
+                float targetY = groundY + RANGE_Y_OFFSET;
 
-                float targetY = groundY + RANGE_Y_OFFSET; // FIX #3
+                Ref<EntityStore> ref = null;
+                // Recycle from pool first (already hidden, just teleport)
+                while (!pool.isEmpty()) {
+                    Ref<EntityStore> c = pool.remove(pool.size() - 1);
+                    if (c != null && c.isValid()) { ref = c; break; }
+                }
 
-                // BUG FIX: Spawn directly at real Y so entity tracker registers position before hide packet
-                Ref<EntityStore> ref = spawnTile(store, model, cx, targetY, cz2);
-                if (ref == null) continue;
-
+                if (ref != null) {
+                    try {
+                        TransformComponent tc = store.getComponent(ref, TransformComponent.getComponentType());
+                        if (tc != null) tc.setPosition(new Vector3d(cx, targetY, cz2));
+                    } catch (Exception ignored) {}
+                } else {
+                    // Fresh spawn: born below player → hide immediately → teleport to real Y.
+                    ref = spawnTile(store, model, parkedX, parkedY, parkedZ);
+                    if (ref == null) continue;
+                    if (owner != null) hideRefFromOthers(store, world, ref, owner);
+                    try {
+                        TransformComponent tc = store.getComponent(ref, TransformComponent.getComponentType());
+                        if (tc != null) tc.setPosition(new Vector3d(cx, targetY, cz2));
+                    } catch (Exception ignored) {}
+                }
                 refs.add(ref);
             }
         }
 
         playerRangeVisuals.put(playerUUID, refs);
-
-        // BUG 1 FIX: Hide from non-owners 300ms after spawn.
-        // 300ms gives entity-tracker time to broadcast spawns to nearby players FIRST.
+        // Grid_Range always covers a full circle → pre-load spell pool for the spell tiles
+        // that will be placed over this ring when the player aims.
         if (owner != null) {
-            final List<Ref<EntityStore>> finalRefs = refs;
-            final PlayerRef finalOwner = owner;
-            SCHED.schedule(() -> world.execute(() ->
-                    hideRefsFromOthers(world, finalRefs, finalOwner)
-            ), 300L, TimeUnit.MILLISECONDS);
+            Model spellMdl = getModel(SPELL_MODEL_ID);
+            if (spellMdl != null)
+                preloadSpellPool(playerUUID, refs.size(), spellMdl, store, world, owner, parkedX, parkedY, parkedZ);
         }
 
-        System.out.println("[Griddify] [RANGE] Range ring: " + refs.size() + " tiles at radius " + rangeGrids);
+        System.out.println("[Griddify] [RANGE] Range ring: " + refs.size() + " tiles at radius " + rangeGrids
+                + " (spawn-hide-teleport)");
     }
 
     /** Legacy overload without owner (range ring visible to all — use sparingly). */
@@ -351,21 +405,24 @@ public class SpellVisualManager {
         showRangeOverlay(playerUUID, casterGridX, casterGridZ, rangeGrids, world, npcY, null);
     }
 
-    /** Clear the Grid_Range ring — parks tiles at y=-30 for reuse, never destroys them. */
+    /** Clear the Grid_Range ring — parks tiles at npcY-30 for reuse (relative, not absolute). */
     public void clearRangeOverlay(UUID playerUUID, World world) {
         List<Ref<EntityStore>> refs = playerRangeVisuals.remove(playerUUID);
         if (refs == null) return;
-        final float PARKED_Y = -30f;
         Store<EntityStore> store = world.getEntityStore().getStore();
+        GridPlayerState _gps = resolveState(playerUUID);
+        float parkedY = (_gps != null) ? _gps.npcY - 30f : -30f;
+        float parkedX = (_gps != null) ? (_gps.currentGridX * 2.0f) + 1.0f : 0f;
+        float parkedZ = (_gps != null) ? (_gps.currentGridZ * 2.0f) + 1.0f : 0f;
         List<Ref<EntityStore>> pool = playerRangePool.computeIfAbsent(playerUUID, k -> new ArrayList<>());
         for (Ref<EntityStore> ref : refs) {
-            if (ref != null && ref.isValid()) {
-                try {
-                    TransformComponent tc = store.getComponent(ref, TransformComponent.getComponentType());
-                    if (tc != null) tc.setPosition(new Vector3d(0, PARKED_Y, 0));
-                } catch (Exception ignored) {}
-                pool.add(ref);
-            }
+            if (ref == null || !ref.isValid()) continue;
+            // Tiles are already hidden from others — just move to parked position.
+            try {
+                TransformComponent tc = store.getComponent(ref, TransformComponent.getComponentType());
+                if (tc != null) tc.setPosition(new Vector3d(parkedX, parkedY, parkedZ));
+            } catch (Exception ignored) {}
+            pool.add(ref);
         }
         refs.clear();
     }
@@ -392,6 +449,27 @@ public class SpellVisualManager {
     /**
      * Send EntityUpdates(removed) for each ref to every player EXCEPT the owner.
      */
+    /** Hide a single tile from all players except owner — immediate, no delay. */
+    private static void hideRefFromOthers(Store<EntityStore> store, World world,
+                                          Ref<EntityStore> ref, PlayerRef owner) {
+        if (ref == null || !ref.isValid()) return;
+        try {
+            NetworkId netIdComp = store.getComponent(ref, NetworkId.getComponentType());
+            if (netIdComp == null) return;
+            int netId = netIdComp.getId();
+            com.hypixel.hytale.server.core.universe.world.PlayerUtil.forEachPlayerThatCanSeeEntity(
+                    ref,
+                    (pRef, pRefComponent, ca) -> {
+                        if (!pRefComponent.getUuid().equals(owner.getUuid())) {
+                            pRefComponent.getPacketHandler().writeNoCache(
+                                    new com.hypixel.hytale.protocol.packets.entities.EntityUpdates(
+                                            new int[]{netId}, null));
+                        }
+                    },
+                    store);
+        } catch (Exception ignored) {}
+    }
+
     private static void hideRefsFromOthers(World world, List<Ref<EntityStore>> refs, PlayerRef owner) {
         Store<EntityStore> store = world.getEntityStore().getStore();
         for (Ref<EntityStore> ref : refs) {
@@ -417,6 +495,14 @@ public class SpellVisualManager {
     // ========================================================
     // Y REFERENCE — always use NPC ground Y, not player body Y
     // ========================================================
+
+    /** Get GridPlayerState for this player (null if not found or not in combat). */
+    private GridPlayerState resolveState(UUID playerUUID) {
+        for (Map.Entry<UUID, GridPlayerState> e : gridManager.getStateEntries()) {
+            if (e.getKey().equals(playerUUID)) return e.getValue();
+        }
+        return null;
+    }
 
     private float resolveNpcY(UUID playerUUID, float fallbackY) {
         for (Map.Entry<UUID, GridPlayerState> e : gridManager.getStateEntries()) {
@@ -474,6 +560,64 @@ public class SpellVisualManager {
             }
         } catch (Exception ignored) {}
         return null;
+    }
+
+    // ========================================================
+    // ENTITY SPAWNING
+    // ========================================================
+
+    // ========================================================
+    // ANGULAR SPREAD — determines if spell pattern is "wide"
+    // ========================================================
+
+    /**
+     * Compute the angular arc in degrees covered by a set of spell cells,
+     * measured from the centroid of the pattern.
+     * Returns 0 for single-cell / collinear, up to 360 for full circles.
+     * Used to decide whether to pre-spawn pool tiles.
+     */
+    private static double angularSpread(Set<SpellPatternCalculator.GridCell> cells) {
+        if (cells.size() <= 1) return 0.0;
+        double cx = 0, cz = 0;
+        for (SpellPatternCalculator.GridCell c : cells) { cx += c.x; cz += c.z; }
+        cx /= cells.size(); cz /= cells.size();
+        List<Double> angles = new ArrayList<>();
+        for (SpellPatternCalculator.GridCell c : cells) {
+            double dx = c.x - cx, dz = c.z - cz;
+            if (Math.abs(dx) < 0.01 && Math.abs(dz) < 0.01) continue;
+            angles.add(Math.toDegrees(Math.atan2(dz, dx)));
+        }
+        if (angles.size() <= 1) return 0.0;
+        java.util.Collections.sort(angles);
+        double maxGap = 0;
+        for (int i = 1; i < angles.size(); i++)
+            maxGap = Math.max(maxGap, angles.get(i) - angles.get(i - 1));
+        maxGap = Math.max(maxGap, (angles.get(0) + 360.0) - angles.get(angles.size() - 1));
+        return 360.0 - maxGap;
+    }
+
+    // ========================================================
+    // POOL PRE-LOADING
+    // ========================================================
+
+    /**
+     * Pre-spawn additional pool tiles so the next showSpellArea can recycle instantly.
+     * Only called for wide spells (>45° arc). Tiles are born below the player and
+     * immediately hidden from non-owners.
+     */
+    private void preloadSpellPool(UUID playerUUID, int targetCount, Model model,
+                                  Store<EntityStore> store, World world, PlayerRef owner,
+                                  float parkedX, float parkedY, float parkedZ) {
+        List<Ref<EntityStore>> pool = playerSpellPool.computeIfAbsent(playerUUID, k -> new ArrayList<>());
+        int toSpawn = Math.max(0, targetCount - pool.size());
+        for (int i = 0; i < toSpawn; i++) {
+            Ref<EntityStore> ref = spawnTile(store, model, parkedX, parkedY, parkedZ);
+            if (ref == null) continue;
+            hideRefFromOthers(store, world, ref, owner);
+            pool.add(ref);
+        }
+        if (toSpawn > 0)
+            System.out.println("[Griddify] [SPELL] Pre-loaded " + toSpawn + " pool tiles (wide spell)");
     }
 
     // ========================================================

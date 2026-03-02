@@ -2,6 +2,7 @@ package com.gridifymydungeon.plugin.gridmove;
 
 import com.gridifymydungeon.plugin.dnd.CharacterStats;
 import com.gridifymydungeon.plugin.spell.SpellCastingState;
+import com.gridifymydungeon.plugin.spell.CustomCastState;
 import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.math.vector.Vector3d;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
@@ -58,6 +59,10 @@ public class GridPlayerState {
     // Active tile map: key="x,z", value=entity ref currently at that grid position
     public java.util.Map<String, Ref<EntityStore>> gridTileMap = new java.util.HashMap<>();
 
+    // Ledge tile map: cliff cells adjacent to BFS frontier.
+    // Key="x,z"  Value=Object[]{Ref<EntityStore>, Float groundY}
+    public java.util.Map<String, Object[]> ledgeTileMap = new java.util.HashMap<>();
+
     // Legacy netId cache (kept for compatibility — now read directly from component)
     public java.util.Map<String, Integer> gridTileNetIds = new java.util.HashMap<>();
 
@@ -103,6 +108,13 @@ public class GridPlayerState {
     public SpellCastingState getSpellCastingState() { return spellCastingState; }
     public void setSpellCastingState(SpellCastingState state) { this.spellCastingState = state; }
     public void clearSpellCastingState() { this.spellCastingState = null; }
+
+    // ── CUSTOM CAST state — GM custom monster attack (/cast custom) ───────
+    private CustomCastState customCastState = null;
+    public CustomCastState getCustomCastState()              { return customCastState; }
+    public void setCustomCastState(CustomCastState s)        { this.customCastState = s; }
+    public void clearCustomCastState()                       { this.customCastState = null; }
+    public boolean hasActiveCustomCast()                     { return customCastState != null; }
 
     public GridPlayerState() {
         this.gridSize = 2.0;

@@ -106,18 +106,12 @@ public class GridOverlayManager {
         Model model = cachedPlayerModel != null ? cachedPlayerModel : cachedDefaultModel;
         if (model == null) return false;
 
-        List<ReachableCell> cells = floodFillReachable(world, state, collisionDetector, excludePlayer);
-
-        // FIX #9: Reuse/teleport existing tiles instead of removing and respawning
-        if (owner != null) {
-            updateCellsWithReuse(world, state, cells, model, 0.02f, owner);
-        } else {
-            updateCellsWithReuse(world, state, cells, model, 0.02f, null);
-        }
-
+        BfsResult bfs = floodFillReachable(world, state, collisionDetector, excludePlayer);
+        updateCellsWithReuse(world, state, bfs.reachable, bfs.ledge, model, 0.02f, owner);
         state.gridOverlayEnabled = true;
         state.gmMapOverlayActive = false;
-        System.out.println("[GridMove] [GRID] Player overlay: " + cells.size() + " cells (reuse)");
+        System.out.println("[GridMove] [GRID] Player overlay: " + bfs.reachable.size()
+                + " reachable + " + bfs.ledge.size() + " ledge");
         return true;
     }
 
@@ -130,11 +124,11 @@ public class GridOverlayManager {
         Model model = cachedPlayerModel != null ? cachedPlayerModel : cachedDefaultModel;
         if (model == null) return false;
         removeGridOverlayEntities(world, state);
-        List<ReachableCell> cells = floodFillReachable(world, state, collisionDetector, null);
-        spawnCells(world, state, cells, model, 0.02f);
+        BfsResult bfs = floodFillReachable(world, state, collisionDetector, null);
+        spawnCells(world, state, bfs.reachable, model, 0.02f);
         state.gridOverlayEnabled = true;
         state.gmMapOverlayActive = false;
-        System.out.println("[GridMove] [GRID] GM BFS overlay (blue): " + cells.size() + " cells");
+        System.out.println("[GridMove] [GRID] GM BFS overlay (blue): " + bfs.reachable.size() + " cells");
         return true;
     }
 
@@ -145,11 +139,11 @@ public class GridOverlayManager {
         Model model = cachedDefaultModel;
         if (model == null) return false;
         removeGridOverlayEntities(world, state);
-        List<ReachableCell> cells = floodFillReachable(world, state, collisionDetector, excludePlayer);
-        spawnCells(world, state, cells, model, 0.01f); // Grid_Basic: +0.01
+        BfsResult bfs = floodFillReachable(world, state, collisionDetector, excludePlayer);
+        spawnCells(world, state, bfs.reachable, model, 0.01f); // Grid_Basic: +0.01
         state.gridOverlayEnabled = true;
         state.gmMapOverlayActive = false;
-        System.out.println("[GridMove] [GRID] Monster overlay: " + cells.size() + " cells");
+        System.out.println("[GridMove] [GRID] Monster overlay: " + bfs.reachable.size() + " cells");
         return true;
     }
 
@@ -328,12 +322,15 @@ public class GridOverlayManager {
      *   so block-scanning only happens for truly-new cells entering the BFS frontier.
      */
     private static void updateCellsWithReuse(World world, GridPlayerState state,
-                                             List<ReachableCell> newCells, Model model,
-                                             float yOffset, PlayerRef owner) {
+                                             List<ReachableCell> newCells,
+                                             List<ReachableCell> ledgeCells,
+                                             Model model, float yOffset, PlayerRef owner) {
         Store<EntityStore> store = world.getEntityStore().getStore();
-        final float PARKED_Y = -30f;
+        // Park 30 units below the player's current Y — always outside tracker range.
+        final float PARKED_Y = state.npcY - 30f;
+        final float PARKED_X = (state.currentGridX * 2.0f) + 1.0f;
+        final float PARKED_Z = (state.currentGridZ * 2.0f) + 1.0f;
 
-        // Build lookup for the incoming cell set
         java.util.Map<String, ReachableCell> incoming = new java.util.HashMap<>();
         for (ReachableCell c : newCells) incoming.put(c.gridX + "," + c.gridZ, c);
 
@@ -342,9 +339,19 @@ public class GridOverlayManager {
             Ref<EntityStore> ref = state.gridTileMap.get(key);
             if (ref == null || !ref.isValid()) { state.gridTileMap.remove(key); continue; }
 
-            ReachableCell cell = incoming.remove(key);   // null → leaving range
+            ReachableCell cell = incoming.remove(key);
             if (cell != null) {
-                // Still reachable — teleport to updated position, re-hide from others
+                // Still reachable — update model first (difficult terrain may have changed).
+                boolean isDiff = TerrainManager.isDifficult(cell.gridX, cell.gridZ, cell.groundY, world);
+                Model correctModel = isDiff ? cachedDifficultModel : model;
+                try {
+                    store.replaceComponent(ref, ModelComponent.getComponentType(),
+                            new ModelComponent(correctModel));
+                    store.replaceComponent(ref, BoundingBox.getComponentType(),
+                            new BoundingBox(correctModel.getBoundingBox()));
+                } catch (Exception ignored) {}
+                // Hide BEFORE teleport so tracker finds non-owners at the old position.
+                if (owner != null) hideFromNonOwners(store, world, ref, owner);
                 float cx = (cell.gridX * 2.0f) + 1.0f;
                 float cz = (cell.gridZ * 2.0f) + 1.0f;
                 float y  = cell.groundY + yOffset;
@@ -352,21 +359,19 @@ public class GridOverlayManager {
                     TransformComponent tc = store.getComponent(ref, TransformComponent.getComponentType());
                     if (tc != null) tc.setPosition(new Vector3d(cx, y, cz));
                 } catch (Exception ignored) {}
-                if (owner != null) hideFromNonOwners(store, world, ref, owner);
             } else {
-                // Leaving BFS range — park at y=-30, VISIBLE TO OWNER, hidden from others.
-                // Owner sees their "shadow" grid below the world; tile ready for instant reuse.
+                // Leaving range — hide FIRST (tile still at real Y), then park below player.
+                if (owner != null) hideFromNonOwners(store, world, ref, owner);
                 try {
                     TransformComponent tc = store.getComponent(ref, TransformComponent.getComponentType());
-                    if (tc != null) tc.setPosition(new Vector3d(0, PARKED_Y, 0));
+                    if (tc != null) tc.setPosition(new Vector3d(PARKED_X, PARKED_Y, PARKED_Z));
                 } catch (Exception ignored) {}
-                if (owner != null) hideFromNonOwners(store, world, ref, owner);
                 state.gridTileMap.remove(key);
                 state.gridTilePool.add(ref);
             }
         }
 
-        // ── 2. Fill new cells — recycle pool tiles first, spawn fresh if needed ─
+        // ── 2. Fill new cells — recycle pool first, fresh spawn if exhausted ─
         java.util.List<PendingTile> pending = new java.util.ArrayList<>();
 
         for (java.util.Map.Entry<String, ReachableCell> e : incoming.entrySet()) {
@@ -375,35 +380,100 @@ public class GridOverlayManager {
             float cx = (cell.gridX * 2.0f) + 1.0f;
             float cz = (cell.gridZ * 2.0f) + 1.0f;
             float targetY = cell.groundY + yOffset;
+            boolean isDiff = TerrainManager.isDifficult(cell.gridX, cell.gridZ, cell.groundY, world);
+            Model correctModel = isDiff ? cachedDifficultModel : model;
 
             Ref<EntityStore> recycled = poolPop(state.gridTilePool);
             if (recycled != null) {
-                // Recycled tile: already known to entity-tracker → teleport + hide immediately
+                // Recycled — reset model, hide, teleport to real Y.
+                try {
+                    store.replaceComponent(recycled, ModelComponent.getComponentType(),
+                            new ModelComponent(correctModel));
+                    store.replaceComponent(recycled, BoundingBox.getComponentType(),
+                            new BoundingBox(correctModel.getBoundingBox()));
+                } catch (Exception ignored) {}
+                if (owner != null) hideFromNonOwners(store, world, recycled, owner);
                 try {
                     TransformComponent tc = store.getComponent(recycled, TransformComponent.getComponentType());
                     if (tc != null) tc.setPosition(new Vector3d(cx, targetY, cz));
                 } catch (Exception ignored) {}
-                if (owner != null) hideFromNonOwners(store, world, recycled, owner);
                 state.gridTileMap.put(key, recycled);
                 continue;
             }
 
-            // Pool exhausted — brand-new entity, born at y=-30 (below world)
-            boolean isDifficult = TerrainManager.isDifficult(cell.gridX, cell.gridZ, cell.groundY, world);
-            Ref<EntityStore> ref = spawnTile(store, isDifficult ? cachedDifficultModel : model, cx, PARKED_Y, cz);
+            // Fresh spawn — born below player (invisible underground), hide after 200ms, teleport up.
+            Ref<EntityStore> ref = spawnTile(store, correctModel, PARKED_X, PARKED_Y, PARKED_Z);
             if (ref == null) continue;
             state.gridTileMap.put(key, ref);
             pending.add(new PendingTile(ref, cx, targetY, cz));
         }
 
-        // ── 3. Rebuild gridOverlay list ───────────────────────────────────────
+        // ── 3. Ledge tiles — cliff cells adjacent to BFS frontier ────────────
+        java.util.Map<String, ReachableCell> ledgeMap = new java.util.HashMap<>();
+        for (ReachableCell c : ledgeCells) ledgeMap.put(c.gridX + "," + c.gridZ, c);
+
+        for (String key : new java.util.HashSet<>(state.ledgeTileMap.keySet())) {
+            if (ledgeMap.containsKey(key)) continue;
+            Object[] entry = state.ledgeTileMap.remove(key);
+            if (entry == null) continue;
+            @SuppressWarnings("unchecked")
+            Ref<EntityStore> ref = (Ref<EntityStore>) entry[0];
+            if (ref == null || !ref.isValid()) continue;
+            if (owner != null) hideFromNonOwners(store, world, ref, owner);
+            try {
+                TransformComponent tc = store.getComponent(ref, TransformComponent.getComponentType());
+                if (tc != null) tc.setPosition(new Vector3d(PARKED_X, PARKED_Y, PARKED_Z));
+            } catch (Exception ignored) {}
+            state.gridTilePool.add(ref);
+        }
+
+        for (java.util.Map.Entry<String, ReachableCell> e : ledgeMap.entrySet()) {
+            String key = e.getKey();
+            ReachableCell cell = e.getValue();
+            float cx = (cell.gridX * 2.0f) + 1.0f;
+            float cz = (cell.gridZ * 2.0f) + 1.0f;
+            float targetY = cell.groundY + yOffset;
+            boolean isDiff = TerrainManager.isDifficult(cell.gridX, cell.gridZ, cell.groundY, world);
+            Model correctModel = isDiff ? cachedDifficultModel : model;
+
+            if (state.ledgeTileMap.containsKey(key)) {
+                @SuppressWarnings("unchecked")
+                Ref<EntityStore> ref = (Ref<EntityStore>) state.ledgeTileMap.get(key)[0];
+                if (ref != null && ref.isValid() && owner != null)
+                    hideFromNonOwners(store, world, ref, owner);
+                continue;
+            }
+
+            Ref<EntityStore> ref = poolPop(state.gridTilePool);
+            if (ref != null) {
+                try {
+                    store.replaceComponent(ref, ModelComponent.getComponentType(),
+                            new ModelComponent(correctModel));
+                    store.replaceComponent(ref, BoundingBox.getComponentType(),
+                            new BoundingBox(correctModel.getBoundingBox()));
+                    TransformComponent tc = store.getComponent(ref, TransformComponent.getComponentType());
+                    if (tc != null) tc.setPosition(new Vector3d(cx, targetY, cz));
+                } catch (Exception ignored) {}
+                if (owner != null) hideFromNonOwners(store, world, ref, owner);
+                state.ledgeTileMap.put(key, new Object[]{ref, targetY});
+            } else {
+                Ref<EntityStore> fresh = spawnTile(store, correctModel, PARKED_X, PARKED_Y, PARKED_Z);
+                if (fresh == null) continue;
+                state.ledgeTileMap.put(key, new Object[]{fresh, targetY});
+                pending.add(new PendingTile(fresh, cx, targetY, cz));
+            }
+        }
+
+        // ── 4. Rebuild gridOverlay ────────────────────────────────────────────
         state.gridOverlay.clear();
         state.gridOverlay.addAll(state.gridTileMap.values());
+        for (Object[] entry : state.ledgeTileMap.values()) {
+            @SuppressWarnings("unchecked")
+            Ref<EntityStore> r = (Ref<EntityStore>) entry[0];
+            if (r != null && r.isValid()) state.gridOverlay.add(r);
+        }
 
-        // ── 4. Fresh tiles: after 200 ms hide from others, then teleport up ───
-        // Born at y=-30 so the entity-tracker broadcasts them there first.
-        // After one tick we hide from non-owners, THEN move to real Y.
-        // Owner sees the tile pop up; non-owners never see it at real Y.
+        // ── 5. Fresh tiles: after 200ms hide from others, teleport to real Y ──
         if (!pending.isEmpty()) {
             final PlayerRef fOwner = owner;
             final java.util.List<PendingTile> fPending = pending;
@@ -421,6 +491,7 @@ public class GridOverlayManager {
         }
 
         System.out.println("[GridMove][GRID] active=" + state.gridTileMap.size()
+                + " ledge=" + state.ledgeTileMap.size()
                 + " pool=" + state.gridTilePool.size()
                 + " freshSpawn=" + pending.size());
     }
@@ -438,8 +509,15 @@ public class GridOverlayManager {
             if (ref != null && ref.isValid())
                 try { store.removeEntity(ref, RemoveReason.REMOVE); } catch (Exception ignored) {}
         }
+        for (Object[] entry : state.ledgeTileMap.values()) {
+            @SuppressWarnings("unchecked")
+            Ref<EntityStore> ref = (Ref<EntityStore>) entry[0];
+            if (ref != null && ref.isValid())
+                try { store.removeEntity(ref, RemoveReason.REMOVE); } catch (Exception ignored) {}
+        }
         state.gridOverlay.clear();
         state.gridTileMap.clear();
+        state.ledgeTileMap.clear();
         state.gridTilePool.clear();
         state.gridTileNetIds.clear();
         state.groundYCache.clear();
@@ -465,20 +543,22 @@ public class GridOverlayManager {
      * Cache is evicted for cells that are now more than (maxMoves+2) Chebyshev steps
      * from the player, keeping memory bounded.
      */
-    private static List<ReachableCell> floodFillReachable(World world, GridPlayerState state,
-                                                          CollisionDetector collisionDetector,
-                                                          UUID excludePlayer) {
+    private static BfsResult floodFillReachable(World world, GridPlayerState state,
+                                                CollisionDetector collisionDetector,
+                                                UUID excludePlayer) {
         int curX = state.currentGridX, curZ = state.currentGridZ;
         float startY = state.npcY;
 
-        List<ReachableCell> result = new ArrayList<>();
+        List<ReachableCell> result  = new ArrayList<>();
+        List<ReachableCell> ledge   = new ArrayList<>();
+        java.util.Set<Long> ledgeSeen = new java.util.HashSet<>();
         Queue<BfsNode> queue = new LinkedList<>();
         Map<Long, Double> bestMoves = new HashMap<>();
 
         long startKey = packKey(curX, curZ);
         queue.add(new BfsNode(curX, curZ, state.remainingMoves, startY));
         bestMoves.put(startKey, state.remainingMoves);
-        state.groundYCache.put(startKey, startY);   // cache player's own cell
+        state.groundYCache.put(startKey, startY);
 
         while (!queue.isEmpty() && result.size() < MAX_OVERLAY_CELLS) {
             BfsNode cur = queue.poll();
@@ -499,17 +579,19 @@ public class GridOverlayManager {
 
                 if (isBarrierCell(world, nx, nz, cur.groundY)) continue;
 
-                // FIX 3: use cached groundY — skip block scan if we already know this cell
                 Float groundY = state.groundYCache.get(nKey);
                 if (groundY == null) {
                     groundY = scanForGround(world, nx, nz, cur.groundY + 6.0f);
                     if (groundY == null) groundY = scanForGround(world, nx, nz, state.npcY + 6.0f);
                     if (groundY == null) continue;
-                    state.groundYCache.put(nKey, groundY);   // cache for next move
+                    state.groundYCache.put(nKey, groundY);
                 }
 
                 float heightDiff = groundY - cur.groundY;
-                if (heightDiff >= MAX_HEIGHT_UP || heightDiff < -MAX_HEIGHT_DOWN) continue;
+                if (heightDiff >= MAX_HEIGHT_UP || heightDiff < -MAX_HEIGHT_DOWN) {
+                    if (ledgeSeen.add(nKey)) ledge.add(new ReachableCell(nx, nz, groundY));
+                    continue;
+                }
 
                 bestMoves.put(nKey, movesAfter);
                 if (nx != curX || nz != curZ) {
@@ -519,7 +601,6 @@ public class GridOverlayManager {
             }
         }
 
-        // Evict cells now far outside the possible range to keep cache bounded
         int evictRadius = (int) Math.ceil(state.remainingMoves) + 4;
         state.groundYCache.entrySet().removeIf(e -> {
             long k = e.getKey();
@@ -529,7 +610,7 @@ public class GridOverlayManager {
 
         state.prevBfsX = curX;
         state.prevBfsZ = curZ;
-        return result;
+        return new BfsResult(result, ledge);
     }
 
     // ========================================================
@@ -692,6 +773,12 @@ public class GridOverlayManager {
 
     private static long packKey(int gridX, int gridZ) {
         return ((long) gridX << 32) | (gridZ & 0xFFFFFFFFL);
+    }
+
+    private static final class BfsResult {
+        final List<ReachableCell> reachable;
+        final List<ReachableCell> ledge;
+        BfsResult(List<ReachableCell> r, List<ReachableCell> l) { reachable = r; ledge = l; }
     }
 
     // ========================================================
