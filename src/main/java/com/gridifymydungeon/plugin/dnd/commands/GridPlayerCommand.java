@@ -22,6 +22,11 @@ import javax.annotation.Nonnull;
  */
 public class GridPlayerCommand extends AbstractPlayerCommand {
 
+    private com.gridifymydungeon.plugin.gridmove.HotbarInputHandler hotbarInputHandler = null;
+    public void setHotbarInputHandler(com.gridifymydungeon.plugin.gridmove.HotbarInputHandler h) {
+        this.hotbarInputHandler = h;
+    }
+
     private final RoleManager roleManager;
 
     public GridPlayerCommand(RoleManager roleManager) {
@@ -75,6 +80,7 @@ public class GridPlayerCommand extends AbstractPlayerCommand {
         int playerNumber = roleManager.assignPlayer(playerRef);
 
         if (playerNumber > 0) {
+            if (hotbarInputHandler != null) hotbarInputHandler.initHudForPlayer(playerRef);
             // SUCCESS: Assigned as player
             Message primary = Message.raw("You are now Player " + playerNumber + "!").color("#00FFFF");
             Message secondary = Message.raw("Use /gridmove to start playing").color("#FFFFFF");

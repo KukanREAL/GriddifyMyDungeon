@@ -60,6 +60,55 @@ public class CastFinalCommand extends AbstractPlayerCommand {
 
         GridPlayerState state = playerManager.getState(playerRef);
 
+        // ── CUSTOM CAST path ─────────────────────────────────────────────────
+        CustomCastState custom = state.getCustomCastState();
+        if (custom != null) {
+            if (!custom.hasDamageConfigured()) {
+                playerRef.sendMessage(Message.raw(
+                        "[Griddify] Set damage first! Use /cdmg and/or /cdicedmg.").color("#FF0000"));
+                return;
+            }
+            if (!custom.hasTargets()) {
+                playerRef.sendMessage(Message.raw(
+                        "[Griddify] No targets confirmed! Use /casttarget to mark targets.").color("#FF0000"));
+                return;
+            }
+
+            // Roll damage once
+            StringBuilder rollLog = new StringBuilder();
+            int totalDmg = custom.rollDamage(rollLog);
+
+            // Report
+            playerRef.sendMessage(Message.raw(
+                    "[Griddify] ★ CUSTOM ATTACK FIRED! " + custom.getTargetCount() + " target(s)").color("#FF69B4"));
+            playerRef.sendMessage(Message.raw(
+                    "[Griddify] Roll: " + rollLog.toString() + " = " + totalDmg + " damage").color("#FF6B6B"));
+
+            // List each target
+            StringBuilder targetList = new StringBuilder("[Griddify] Targets: ");
+            java.util.List<int[]> targets = custom.getConfirmedTargets();
+            for (int i = 0; i < targets.size(); i++) {
+                int[] t = targets.get(i);
+                targetList.append("(").append(t[0]).append(",").append(t[1]).append(")");
+                if (i < targets.size() - 1) targetList.append(", ");
+            }
+            playerRef.sendMessage(Message.raw(targetList.toString()).color("#FFAAAA"));
+            playerRef.sendMessage(Message.raw(
+                    "[Griddify] Apply " + totalDmg + " damage to each marked target.").color("#FF0000"));
+
+            // Cleanup
+            state.clearCustomCastState();
+            world.execute(() -> {
+                visualManager.clearSpellVisuals(playerRef.getUuid(), world);
+                visualManager.clearRangeOverlay(playerRef.getUuid(), world);
+            });
+
+            System.out.println("[Griddify] [CUSTOM] " + playerRef.getUsername()
+                    + " fired custom attack: " + rollLog + " = " + totalDmg
+                    + " on " + targets.size() + " targets");
+            return;
+        }
+
         // Must have a spell prepared
         SpellCastingState castState = state.getSpellCastingState();
         if (castState == null || !castState.isValid()) {

@@ -44,6 +44,18 @@ public class CastCancelCommand extends AbstractPlayerCommand {
 
         GridPlayerState state = playerManager.getState(playerRef);
 
+        // ── CUSTOM CAST cancel ───────────────────────────────────────────────
+        if (state.hasActiveCustomCast()) {
+            state.clearCustomCastState();
+            world.execute(() -> {
+                visualManager.clearSpellVisuals(playerRef.getUuid(), world);
+                visualManager.clearRangeOverlay(playerRef.getUuid(), world);
+            });
+            playerRef.sendMessage(Message.raw("[Griddify] Custom attack cancelled.").color("#FFA500"));
+            System.out.println("[Griddify] [CUSTOM] " + playerRef.getUsername() + " cancelled custom attack");
+            return;
+        }
+
         if (state.getSpellCastingState() == null) {
             playerRef.sendMessage(Message.raw("[Griddify] No spell prepared to cancel.").color("#FFA500"));
             return;

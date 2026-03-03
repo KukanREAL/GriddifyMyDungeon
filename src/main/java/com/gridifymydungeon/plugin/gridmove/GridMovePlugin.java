@@ -11,6 +11,7 @@ import com.hypixel.hytale.event.EventRegistration;
 import com.hypixel.hytale.protocol.packets.player.ClientMovement;
 import com.hypixel.hytale.server.core.event.events.player.PlayerDisconnectEvent;
 import com.hypixel.hytale.server.core.io.adapter.PacketAdapters;
+import com.hypixel.hytale.server.core.io.adapter.PacketFilter;
 import com.hypixel.hytale.server.core.io.adapter.PacketWatcher;
 import com.hypixel.hytale.server.core.io.handlers.game.GamePacketHandler;
 import com.hypixel.hytale.server.core.plugin.JavaPlugin;
@@ -41,6 +42,8 @@ public class GridMovePlugin extends JavaPlugin {
 
     // Handlers
     private ClientMovementHandler movementHandler;
+    private HotbarInputHandler hotbarInputHandler;
+    private PacketFilter hotbarPacketFilter;
 
     // Listeners
     private PlayerDisconnectListener disconnectListener;
@@ -100,6 +103,9 @@ public class GridMovePlugin extends JavaPlugin {
         if (this.disconnectRegistration != null) {
             this.disconnectRegistration.unregister();
         }
+        if (hotbarPacketFilter != null) {
+            PacketAdapters.deregisterInbound(hotbarPacketFilter);
+        }
 
         getLogger().at(Level.INFO).log("GridMove v%s shutdown complete!", VERSION);
     }
@@ -125,8 +131,13 @@ public class GridMovePlugin extends JavaPlugin {
 
     private void registerCommands() {
         // Role commands
-        getCommandRegistry().registerCommand(new GMCommand(roleManager));
-        getCommandRegistry().registerCommand(new GridPlayerCommand(roleManager));
+        GMCommand gmCmd = new GMCommand(roleManager);
+        GridPlayerCommand gridPlayerCmd = new GridPlayerCommand(roleManager);
+        getCommandRegistry().registerCommand(gmCmd);
+        getCommandRegistry().registerCommand(gridPlayerCmd);
+        // Wire HUD init — set after hotbarInputHandler is constructed (in registerPacketHandlers)
+        gmCmdRef = gmCmd;
+        gridPlayerCmdRef = gridPlayerCmd;
         getCommandRegistry().registerCommand(new GridNullCommand(roleManager));
         getCommandRegistry().registerCommand(new GridRestartCommand(roleManager));
 
@@ -216,6 +227,14 @@ public class GridMovePlugin extends JavaPlugin {
         // TestFogCommand removed — replaced by FogOfWarCommand (/FogOfWar)
         getCommandRegistry().registerCommand(fogOfWarCommand);
         getCommandRegistry().registerCommand(new GridHelpCommand(roleManager));
+
+        // Build and register hotbar input handler (needs spellVisualManager, built above)
+        this.hotbarInputHandler = new HotbarInputHandler(
+                gridMoveManager, encounterManager, spellVisualManager, roleManager, collisionDetector);
+        hotbarPacketFilter = PacketAdapters.registerInbound(hotbarInputHandler);
+        disconnectListener.setHotbarInputHandler(hotbarInputHandler);
+        if (gmCmdRef        != null) gmCmdRef.setHotbarInputHandler(hotbarInputHandler);
+        if (gridPlayerCmdRef != null) gridPlayerCmdRef.setHotbarInputHandler(hotbarInputHandler);
 
         getLogger().at(Level.INFO).log("Registered all commands successfully!");
     }

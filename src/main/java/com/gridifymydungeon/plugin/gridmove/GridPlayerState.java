@@ -105,6 +105,9 @@ public class GridPlayerState {
     public String   storedRightHand  = null;
     public String   storedLeftHand   = null;
 
+    // ── HOTBAR MODE state ─────────────────────────────────────────────────────
+    public PlayerHotbarState hotbarState = new PlayerHotbarState();
+
     public SpellCastingState getSpellCastingState() { return spellCastingState; }
     public void setSpellCastingState(SpellCastingState state) { this.spellCastingState = state; }
     public void clearSpellCastingState() { this.spellCastingState = null; }

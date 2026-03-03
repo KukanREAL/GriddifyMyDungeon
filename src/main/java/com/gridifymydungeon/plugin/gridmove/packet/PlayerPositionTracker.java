@@ -118,6 +118,13 @@ public class PlayerPositionTracker {
 
         // While casting: update player position (rotates CONE/LINE/WALL direction live),
         // refresh the red overlay, and cancel targeted spells if the player walks out of range.
+        if (spellVisualManager != null) {
+            // Custom cast: keep aim in sync with player position (unlimited range)
+            com.gridifymydungeon.plugin.spell.CustomCastState customCast = state.getCustomCastState();
+            if (customCast != null) {
+                customCast.setAim(newGridX, newGridZ);
+            }
+        }
         if (isCasting && spellVisualManager != null) {
             com.gridifymydungeon.plugin.spell.SpellCastingState castState = state.getSpellCastingState();
             if (castState != null && (castState.getAimGridX() != newGridX || castState.getAimGridZ() != newGridZ)) {

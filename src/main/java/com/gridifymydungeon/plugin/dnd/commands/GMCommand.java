@@ -20,6 +20,12 @@ import javax.annotation.Nonnull;
  */
 public class GMCommand extends AbstractPlayerCommand {
 
+    // Injected after construction — used to register HUD once role is assigned
+    private com.gridifymydungeon.plugin.gridmove.HotbarInputHandler hotbarInputHandler = null;
+    public void setHotbarInputHandler(com.gridifymydungeon.plugin.gridmove.HotbarInputHandler h) {
+        this.hotbarInputHandler = h;
+    }
+
     private final RoleManager roleManager;
 
     public GMCommand(RoleManager roleManager) {
@@ -60,6 +66,7 @@ public class GMCommand extends AbstractPlayerCommand {
         boolean success = roleManager.assignGM(playerRef);
 
         if (success) {
+            if (hotbarInputHandler != null) hotbarInputHandler.initHudForPlayer(playerRef);
             playerRef.sendMessage(Message.raw(""));
             playerRef.sendMessage(Message.raw("=========================================").color("#FFD700"));
             playerRef.sendMessage(Message.raw("       GAME MASTER ASSIGNED").color("#FF0000"));

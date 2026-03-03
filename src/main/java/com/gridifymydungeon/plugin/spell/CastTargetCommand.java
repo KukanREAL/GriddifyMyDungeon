@@ -46,6 +46,35 @@ public class CastTargetCommand extends AbstractPlayerCommand {
                            @Nonnull World world) {
 
         GridPlayerState state = playerManager.getState(playerRef);
+
+        // ── CUSTOM CAST path: unlimited range, no range check ────────────────
+        CustomCastState custom = state.getCustomCastState();
+        if (custom != null) {
+            if (!custom.hasDamageConfigured()) {
+                playerRef.sendMessage(Message.raw(
+                        "[Griddify] Set damage first! Use /cdmg and/or /cdicedmg.").color("#FF0000"));
+                return;
+            }
+            // Confirm current aim position as a target (unlimited range)
+            int tx = state.currentGridX;
+            int tz = state.currentGridZ;
+            custom.setAim(tx, tz);
+            custom.confirmTarget(tx, tz);
+
+            // Show a Grid_Spell tile at the confirmed cell
+            java.util.Set<SpellPatternCalculator.GridCell> cells = new java.util.HashSet<>();
+            cells.add(new SpellPatternCalculator.GridCell(tx, tz));
+            final java.util.Set<SpellPatternCalculator.GridCell> finalCells = cells;
+            final float refY = custom.casterY;
+            world.execute(() -> visualManager.showSpellArea(playerRef.getUuid(), finalCells, world, refY, playerRef));
+
+            int total = custom.getTargetCount();
+            playerRef.sendMessage(Message.raw("[Griddify] ★ Target " + total + " confirmed at ("
+                    + tx + ", " + tz + "). " + custom.damageSummary()).color("#FF69B4"));
+            playerRef.sendMessage(Message.raw("[Griddify] Add more with /casttarget, or fire with /castfinal.").color("#87CEEB"));
+            return;
+        }
+
         SpellCastingState castState = state.getSpellCastingState();
 
         if (castState == null || !castState.isValid()) {

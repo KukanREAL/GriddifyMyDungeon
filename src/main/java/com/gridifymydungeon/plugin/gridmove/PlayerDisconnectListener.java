@@ -14,10 +14,15 @@ public class PlayerDisconnectListener {
 
     private final GridMoveManager manager;
     private final RoleManager roleManager;
+    private HotbarInputHandler hotbarInputHandler = null;
 
     public PlayerDisconnectListener(GridMoveManager manager, RoleManager roleManager) {
         this.manager = manager;
         this.roleManager = roleManager;
+    }
+
+    public void setHotbarInputHandler(HotbarInputHandler h) {
+        this.hotbarInputHandler = h;
     }
 
     public void onPlayerDisconnect(PlayerDisconnectEvent event) {
@@ -41,6 +46,11 @@ public class PlayerDisconnectListener {
 
         // Notify role manager
         roleManager.handlePlayerDisconnect(playerRef.getUuid());
+
+        // Clean up hotbar HUD state
+        if (hotbarInputHandler != null) {
+            hotbarInputHandler.onPlayerDisconnect(playerRef);
+        }
 
         System.out.println("[GridMove] [INFO] Cleanup complete for " + playerRef.getUsername());
     }
