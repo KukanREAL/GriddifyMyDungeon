@@ -11,12 +11,14 @@ import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.component.Store;
 import com.hypixel.hytale.math.vector.Vector3d;
 import com.hypixel.hytale.protocol.InteractionType;
+import com.hypixel.hytale.protocol.MovementStates;
 import com.hypixel.hytale.protocol.Packet;
 import com.hypixel.hytale.protocol.packets.interaction.SyncInteractionChain;
 import com.hypixel.hytale.protocol.packets.interaction.SyncInteractionChains;
 import com.hypixel.hytale.protocol.packets.inventory.SetActiveSlot;
 import com.hypixel.hytale.protocol.packets.player.ClientMovement;
 import com.hypixel.hytale.server.core.Message;
+import com.hypixel.hytale.server.core.command.system.CommandManager;
 import com.hypixel.hytale.server.core.entity.entities.Player;
 import com.hypixel.hytale.server.core.inventory.Inventory;
 import com.hypixel.hytale.server.core.io.adapter.PlayerPacketFilter;
@@ -98,8 +100,8 @@ public class HotbarInputHandler implements PlayerPacketFilter {
         }
 
         if (packet instanceof ClientMovement cm) {
-            // NOTE: field name is isSneaking — adjust if your server.jar differs
-            boolean now  = cm.isSneaking;
+            // Sneak = MovementStates.crouching (leading-edge)
+            boolean now  = cm.movementStates != null && cm.movementStates.crouching;
             boolean prev = wasSneaking.getOrDefault(playerRef.getUuid(), false);
             wasSneaking.put(playerRef.getUuid(), now);
             if (now && !prev) return handleCrouch(playerRef);
@@ -220,7 +222,7 @@ public class HotbarInputHandler implements PlayerPacketFilter {
 
             case TARGETING:
                 world.execute(() -> {
-                    com.hypixel.hytale.server.core.command.CommandManager.get()
+                    CommandManager.get()
                             .handleCommand(playerRef, "CastTarget");
                     refreshHud(playerRef, state, entityRef, store);
                 });
@@ -228,7 +230,7 @@ public class HotbarInputHandler implements PlayerPacketFilter {
 
             case CAST_FINAL:
                 world.execute(() -> {
-                    com.hypixel.hytale.server.core.command.CommandManager.get()
+                    CommandManager.get()
                             .handleCommand(playerRef, "CastFinal");
                     hs.setMode(PlayerHotbarState.Mode.NONE);
                     refreshHud(playerRef, state, entityRef, store);
@@ -349,14 +351,14 @@ public class HotbarInputHandler implements PlayerPacketFilter {
             playerRef.sendMessage(Message.raw("[Griddify] No spell selected.").color("#FF0000"));
             return;
         }
-        com.hypixel.hytale.server.core.command.CommandManager.get()
+        CommandManager.get()
                 .handleCommand(playerRef, "Cast " + spell.getName());
         state.hotbarState.spellConfirmed = true;
     }
 
     private void cancelCastIfActive(PlayerRef playerRef, GridPlayerState state) {
         if (state.getSpellCastingState() != null || state.hasActiveCustomCast()) {
-            com.hypixel.hytale.server.core.command.CommandManager.get()
+            CommandManager.get()
                     .handleCommand(playerRef, "CastCancel");
         }
         state.hotbarState.spellConfirmed = false;
@@ -395,7 +397,7 @@ public class HotbarInputHandler implements PlayerPacketFilter {
         huds.put(uuid, hud);
         try {
             Player player = store.getComponent(entityRef, Player.getComponentType());
-            if (player != null) player.getHudManager().setCustomHud(entityRef, store, hud);
+            if (player != null) player.getHudManager().setCustomHud(playerRef, hud);
         } catch (Exception e) {
             System.err.println("[Griddify] [HUD] Failed for " + playerRef.getUsername() + ": " + e.getMessage());
             huds.remove(uuid);

@@ -7,7 +7,7 @@ import com.gridifymydungeon.plugin.spell.SpellCastingState;
 import com.gridifymydungeon.plugin.spell.SpellData;
 import com.gridifymydungeon.plugin.spell.SpellDatabase;
 import com.hypixel.hytale.server.core.Message;
-import com.hypixel.hytale.server.core.ui.CustomUIHud;
+import com.hypixel.hytale.server.core.entity.entities.player.hud.CustomUIHud;
 import com.hypixel.hytale.server.core.ui.builder.UICommandBuilder;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
 

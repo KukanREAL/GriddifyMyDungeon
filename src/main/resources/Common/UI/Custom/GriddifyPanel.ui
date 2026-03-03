@@ -1,0 +1,40 @@
+// Griddify HUD Panel — top-left overlay
+// Shows mode status, spell list, profile, etc. depending on active hotbar mode.
+// All content is dynamically set from Java via update() calls.
+// Lines are hidden (empty text) when not needed.
+
+Group #GriddifyRoot {
+    Anchor: (Left: 12, Top: 12);
+    LayoutMode: Top;
+
+    // ── Title bar ─────────────────────────────────────────────────────────────
+    Label #PanelTitle {
+        Style: (FontSize: 14, Alignment: Left);
+        Anchor: (Width: 320, Height: 22);
+        Text: "";
+        Padding: (Left: 6, Right: 6);
+    }
+
+    // ── Subtitle / status line ────────────────────────────────────────────────
+    Label #PanelSub {
+        Style: (FontSize: 11, Alignment: Left);
+        Anchor: (Width: 320, Height: 18);
+        Text: "";
+        Padding: (Left: 6, Right: 6);
+    }
+
+    // ── List rows (up to 12) ─────────────────────────────────────────────────
+    // Normal rows
+    Label #Line1  { Style: (FontSize: 11, Alignment: Left); Anchor: (Width: 320, Height: 17); Text: ""; Padding: (Left: 6, Right: 6); }
+    Label #Line2  { Style: (FontSize: 11, Alignment: Left); Anchor: (Width: 320, Height: 17); Text: ""; Padding: (Left: 6, Right: 6); }
+    Label #Line3  { Style: (FontSize: 11, Alignment: Left); Anchor: (Width: 320, Height: 17); Text: ""; Padding: (Left: 6, Right: 6); }
+    Label #Line4  { Style: (FontSize: 11, Alignment: Left); Anchor: (Width: 320, Height: 17); Text: ""; Padding: (Left: 6, Right: 6); }
+    Label #Line5  { Style: (FontSize: 11, Alignment: Left); Anchor: (Width: 320, Height: 17); Text: ""; Padding: (Left: 6, Right: 6); }
+    Label #Line6  { Style: (FontSize: 11, Alignment: Left); Anchor: (Width: 320, Height: 17); Text: ""; Padding: (Left: 6, Right: 6); }
+    Label #Line7  { Style: (FontSize: 11, Alignment: Left); Anchor: (Width: 320, Height: 17); Text: ""; Padding: (Left: 6, Right: 6); }
+    Label #Line8  { Style: (FontSize: 11, Alignment: Left); Anchor: (Width: 320, Height: 17); Text: ""; Padding: (Left: 6, Right: 6); }
+    Label #Line9  { Style: (FontSize: 11, Alignment: Left); Anchor: (Width: 320, Height: 17); Text: ""; Padding: (Left: 6, Right: 6); }
+    Label #Line10 { Style: (FontSize: 11, Alignment: Left); Anchor: (Width: 320, Height: 17); Text: ""; Padding: (Left: 6, Right: 6); }
+    Label #Line11 { Style: (FontSize: 11, Alignment: Left); Anchor: (Width: 320, Height: 17); Text: ""; Padding: (Left: 6, Right: 6); }
+    Label #Line12 { Style: (FontSize: 11, Alignment: Left); Anchor: (Width: 320, Height: 17); Text: ""; Padding: (Left: 6, Right: 6); }
+}
