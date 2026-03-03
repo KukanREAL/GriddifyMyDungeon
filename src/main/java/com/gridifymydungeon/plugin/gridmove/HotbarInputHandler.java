@@ -5,6 +5,7 @@ import com.gridifymydungeon.plugin.dnd.EncounterManager;
 import com.gridifymydungeon.plugin.dnd.MonsterState;
 import com.gridifymydungeon.plugin.dnd.PlayerEntityController;
 import com.gridifymydungeon.plugin.dnd.RoleManager;
+import com.gridifymydungeon.plugin.spell.SpellCastingState;
 import com.gridifymydungeon.plugin.spell.SpellData;
 import com.gridifymydungeon.plugin.spell.SpellVisualManager;
 import com.hypixel.hytale.component.Ref;
@@ -34,31 +35,34 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * Intercepts hotbar key presses (SyncInteractionChains) and crouch (ClientMovement.isSneaking).
+ * Hotbar key bindings (slot 0-based, key = slot+1):
  *
- * HUD is invisible until /GridPlayer or /GridGM assigns a role.
- * initHudForPlayer() is called by GMCommand/GridPlayerCommand after role assignment.
+ *   Key 1 (slot 0) — Cancel / deactivate. Freezes NPC. Cancels active cast.
+ *                    GM: also releases monster control.
+ *   Key 2 (slot 1) — Move. Player: spawn NPC if not yet spawned; re-activate move if frozen.
+ *                    GM: auto-control monster at current grid cell.
+ *   Key 3 (slot 2) — Spell select. Shows list; crouch scrolls through it.
+ *   Key 4 (slot 3) — Confirm spell. Crouch fires /cast <selected spell>.
+ *   Key 5 (slot 4) — Targeting. Crouch fires /casttarget.
+ *   Key 6 (slot 5) — Cast final. Crouch fires /castfinal.
+ *   Key 7 (slot 6) — Profile (prints to chat).
+ *   Key 8 (slot 7) — Spell list (prints to chat).
+ *   Key 9 (slot 8) — End turn (/endturn).
  *
- * Slot map (0-based):
- *   0 (key 1) NONE        — GM: release control. Both: cancel cast. Panel hides.
- *   1 (key 2) MOVE        — Player: spawn/toggle NPC. GM: auto-control monster at XZ.
- *   2 (key 3) SPELL_SELECT— shows current spell; crouch scrolls; 2nd press = /cast
- *   3 (key 4) LIST_SPELLS — compact read-only spell list
- *   4 (key 5) CAST_FINAL  — arm; crouch = /castfinal
- *   5 (key 6) TARGETING   — arm; crouch = /casttarget
- *   6 (key 7) PROFILE     — character stats
- *   7-8       pass through
+ * No CustomUI — all feedback via chat messages.
  */
 public class HotbarInputHandler implements PlayerPacketFilter {
 
-    private static final int SLOT_NONE         = 0;
-    private static final int SLOT_MOVE         = 1;
-    private static final int SLOT_SPELL_SELECT = 2;
-    private static final int SLOT_LIST_SPELLS  = 3;
-    private static final int SLOT_CAST_FINAL   = 4;
-    private static final int SLOT_TARGETING    = 5;
-    private static final int SLOT_PROFILE      = 6;
-    private static final int SLOT_MAX_CUSTOM   = 6;
+    private static final int SLOT_CANCEL       = 0;  // key 1
+    private static final int SLOT_MOVE         = 1;  // key 2
+    private static final int SLOT_SPELL_SELECT = 2;  // key 3
+    private static final int SLOT_CONFIRM      = 3;  // key 4 — confirm spell, crouch = /cast
+    private static final int SLOT_TARGETING    = 4;  // key 5 — crouch = /casttarget
+    private static final int SLOT_CAST_FINAL   = 5;  // key 6 — crouch = /castfinal
+    private static final int SLOT_PROFILE      = 6;  // key 7
+    private static final int SLOT_LIST_SPELLS  = 7;  // key 8
+    private static final int SLOT_END_TURN     = 8;  // key 9
+    private static final int SLOT_MAX_CUSTOM   = 8;
 
     private final GridMoveManager    gridManager;
     private final EncounterManager   encounterManager;
@@ -66,23 +70,22 @@ public class HotbarInputHandler implements PlayerPacketFilter {
     private final RoleManager        roleManager;
     private final CollisionDetector  collisionDetector;
 
-    private final Map<UUID, Boolean>     wasSneaking = new HashMap<>();
+    private final Map<UUID, Boolean> wasSneaking = new HashMap<>();
 
     public HotbarInputHandler(GridMoveManager gridManager, EncounterManager encounterManager,
                               SpellVisualManager spellVisualManager, RoleManager roleManager,
                               CollisionDetector collisionDetector) {
-        this.gridManager       = gridManager;
-        this.encounterManager  = encounterManager;
+        this.gridManager        = gridManager;
+        this.encounterManager   = encounterManager;
         this.spellVisualManager = spellVisualManager;
-        this.roleManager       = roleManager;
-        this.collisionDetector = collisionDetector;
+        this.roleManager        = roleManager;
+        this.collisionDetector  = collisionDetector;
     }
 
     // ── PacketFilter ──────────────────────────────────────────────────────────
 
     @Override
     public boolean test(@Nonnull PlayerRef playerRef, @Nonnull Packet packet) {
-        // Only active after /GridPlayer or /GridGM
         if (!roleManager.hasRole(playerRef)) return false;
 
         if (packet instanceof SyncInteractionChains syncPacket) {
@@ -99,7 +102,6 @@ public class HotbarInputHandler implements PlayerPacketFilter {
         }
 
         if (packet instanceof ClientMovement cm) {
-            // Sneak = MovementStates.crouching (leading-edge)
             boolean now  = cm.movementStates != null && cm.movementStates.crouching;
             boolean prev = wasSneaking.getOrDefault(playerRef.getUuid(), false);
             wasSneaking.put(playerRef.getUuid(), now);
@@ -123,23 +125,36 @@ public class HotbarInputHandler implements PlayerPacketFilter {
             PlayerHotbarState hs = state.hotbarState;
             boolean isGM = DebugRoleWrapper.isGM(roleManager, playerRef);
 
+            // Pressing any key except 1 and 2 while in MOVE mode freezes the NPC automatically
+            if (slot != SLOT_CANCEL && slot != SLOT_MOVE
+                    && hs.activeMode == PlayerHotbarState.Mode.MOVE
+                    && !isGM
+                    && state.npcEntity != null && state.npcEntity.isValid()) {
+                state.freeze("hotbar-switch");
+                chat(playerRef, "#AAAAAA", "NPC frozen. Press [2] from its cell to move again.");
+            }
+
             switch (slot) {
 
-                case SLOT_NONE:
-                    // GM: release monster control
+                // ── Key 1: cancel / freeze ────────────────────────────────────
+                case SLOT_CANCEL:
                     if (isGM) {
                         MonsterState controlled = encounterManager.getControlledMonster();
                         if (controlled != null) {
                             encounterManager.releaseControl();
-                            playerRef.sendMessage(Message.raw(
-                                            "[Griddify] Released: " + controlled.getDisplayName())
-                                    .color("#FFA500"));
+                            chat(playerRef, "#FFA500", "Released: " + controlled.getDisplayName());
                         }
                     }
-                    cancelCastIfActive(playerRef, state);
+                    if (state.getSpellCastingState() != null || state.hasActiveCustomCast()) {
+                        CommandManager.get().handleCommand(playerRef, "CastCancel");
+                        chat(playerRef, "#AAAAAA", "Cast cancelled.");
+                    }
+                    state.freeze("key1");
                     hs.setMode(PlayerHotbarState.Mode.NONE);
+                    chat(playerRef, "#AAAAAA", "[1] NPC frozen. Press [2] to move again.");
                     break;
 
+                // ── Key 2: move ───────────────────────────────────────────────
                 case SLOT_MOVE:
                     if (isGM) {
                         handleGmMove(playerRef, state, world);
@@ -148,54 +163,80 @@ public class HotbarInputHandler implements PlayerPacketFilter {
                     }
                     break;
 
-                case SLOT_SPELL_SELECT:
-                    if (hs.activeMode == PlayerHotbarState.Mode.SPELL_SELECT && !hs.spellConfirmed) {
-                        confirmSpell(playerRef, state);
+                // ── Key 3: spell select ───────────────────────────────────────
+                case SLOT_SPELL_SELECT: {
+                    List<SpellData> spells = GriddifyHud.buildSpellList(state, encounterManager, roleManager);
+                    hs.spellList        = spells;
+                    hs.spellSelectIndex = 0;
+                    hs.spellConfirmed   = false;
+                    hs.setMode(PlayerHotbarState.Mode.SPELL_SELECT);
+                    if (spells.isEmpty()) {
+                        chat(playerRef, "#FF0000", "No spells available — use /GridClass first.");
                     } else {
-                        cancelCastIfActive(playerRef, state);
-                        List<SpellData> spells = GriddifyHud.buildSpellList(state, encounterManager, roleManager);
-                        hs.spellList        = spells;
-                        hs.spellSelectIndex = 0;
-                        hs.spellConfirmed   = false;
-                        hs.setMode(PlayerHotbarState.Mode.SPELL_SELECT);
-                        if (spells.isEmpty())
-                            playerRef.sendMessage(Message.raw("[Griddify] No spells available!").color("#FF0000"));
+                        chat(playerRef, "#AAAAAA", "--- SELECT SPELL ---");
+                        printSpellCursor(playerRef, hs);
+                        chat(playerRef, "#AAAAAA", "Crouch: scroll  [4]: confirm spell");
                     }
                     break;
+                }
 
-                case SLOT_LIST_SPELLS:
-                    hs.setMode(hs.activeMode == PlayerHotbarState.Mode.LIST_SPELLS
-                            ? PlayerHotbarState.Mode.NONE
-                            : PlayerHotbarState.Mode.LIST_SPELLS);
-                    break;
-
-                case SLOT_CAST_FINAL:
-                    if (state.getSpellCastingState() != null || state.hasActiveCustomCast()) {
-                        hs.setMode(hs.activeMode == PlayerHotbarState.Mode.CAST_FINAL
-                                ? PlayerHotbarState.Mode.SPELL_SELECT
-                                : PlayerHotbarState.Mode.CAST_FINAL);
+                // ── Key 4: confirm spell (crouch fires /cast) ─────────────────
+                case SLOT_CONFIRM: {
+                    SpellData spell = hs.getSelectedSpell();
+                    if (spell == null) {
+                        chat(playerRef, "#FF0000", "No spell selected — use [3] first.");
                     } else {
-                        playerRef.sendMessage(Message.raw("[Griddify] No spell prepared — use key 3 first.").color("#FF0000"));
+                        hs.setMode(PlayerHotbarState.Mode.CONFIRM);
+                        chat(playerRef, "#FFD700", "[4] Ready: " + spell.getName()
+                                + " — crouch to cast.");
                     }
                     break;
+                }
 
-                case SLOT_TARGETING:
-                    if (state.getSpellCastingState() != null || state.hasActiveCustomCast()) {
-                        hs.setMode(hs.activeMode == PlayerHotbarState.Mode.TARGETING
-                                ? PlayerHotbarState.Mode.SPELL_SELECT
-                                : PlayerHotbarState.Mode.TARGETING);
+                // ── Key 5: targeting (crouch fires /casttarget) ───────────────
+                case SLOT_TARGETING: {
+                    SpellCastingState cast = state.getSpellCastingState();
+                    if (cast == null && !state.hasActiveCustomCast()) {
+                        chat(playerRef, "#FF0000", "No active spell — confirm with [4]+crouch first.");
                     } else {
-                        playerRef.sendMessage(Message.raw("[Griddify] No spell prepared — use key 3 first.").color("#FF0000"));
+                        hs.setMode(PlayerHotbarState.Mode.TARGETING);
+                        int confirmed = cast != null ? cast.getConfirmedTargetCount() : 0;
+                        int max       = cast != null ? cast.getSpell().getMaxTargets() : 1;
+                        chat(playerRef, "#87CEEB", "[5] TARGETING (" + confirmed + "/" + max
+                                + ") — crouch to confirm cell.");
                     }
                     break;
+                }
 
+                // ── Key 6: cast final (crouch fires /castfinal) ───────────────
+                case SLOT_CAST_FINAL: {
+                    SpellCastingState cast = state.getSpellCastingState();
+                    if (cast == null && !state.hasActiveCustomCast()) {
+                        chat(playerRef, "#FF0000", "No active spell — confirm with [4]+crouch first.");
+                    } else {
+                        hs.setMode(PlayerHotbarState.Mode.CAST_FINAL);
+                        String spellName = cast != null ? cast.getSpell().getName() : "custom";
+                        chat(playerRef, "#FF4500", "[6] ARMED: " + spellName + " — crouch to FIRE!");
+                    }
+                    break;
+                }
+
+                // ── Key 7: profile ────────────────────────────────────────────
                 case SLOT_PROFILE:
-                    hs.setMode(hs.activeMode == PlayerHotbarState.Mode.PROFILE
-                            ? PlayerHotbarState.Mode.NONE
-                            : PlayerHotbarState.Mode.PROFILE);
+                    printProfile(playerRef, state);
+                    break;
+
+                // ── Key 8: spell list ─────────────────────────────────────────
+                case SLOT_LIST_SPELLS:
+                    printSpellList(playerRef, state);
+                    break;
+
+                // ── Key 9: end turn ───────────────────────────────────────────
+                case SLOT_END_TURN:
+                    CommandManager.get().handleCommand(playerRef, "endturn");
+                    chat(playerRef, "#FFA500", "Turn ended.");
                     break;
             }
-
         });
     }
 
@@ -211,24 +252,51 @@ public class HotbarInputHandler implements PlayerPacketFilter {
         PlayerHotbarState hs = state.hotbarState;
 
         switch (hs.activeMode) {
+
+            // Crouch in SPELL_SELECT scrolls to next spell
             case SPELL_SELECT:
                 world.execute(() -> {
                     hs.advanceSpellIndex();
+                    printSpellCursor(playerRef, hs);
                 });
                 return true;
 
+            // Crouch in CONFIRM fires /cast <spell>
+            case CONFIRM:
+                world.execute(() -> {
+                    SpellData spell = hs.getSelectedSpell();
+                    if (spell == null) {
+                        chat(playerRef, "#FF0000", "No spell selected — press [3] first.");
+                        return;
+                    }
+                    CommandManager.get().handleCommand(playerRef, "Cast " + spell.getName());
+                    hs.spellConfirmed = true;
+                    hs.setMode(PlayerHotbarState.Mode.TARGETING);
+                    chat(playerRef, "#FFD700", "Casting: " + spell.getName()
+                            + " — [5] to target, [6] to fire.");
+                });
+                return true;
+
+            // Crouch in TARGETING fires /casttarget
             case TARGETING:
                 world.execute(() -> {
-                    CommandManager.get()
-                            .handleCommand(playerRef, "CastTarget");
+                    CommandManager.get().handleCommand(playerRef, "CastTarget");
+                    SpellCastingState cast = state.getSpellCastingState();
+                    if (cast != null) {
+                        int confirmed = cast.getConfirmedTargetCount();
+                        int max = cast.getSpell().getMaxTargets();
+                        chat(playerRef, "#87CEEB", "Target confirmed (" + confirmed + "/" + max
+                                + "). Crouch again or [6]+crouch to fire.");
+                    }
                 });
                 return true;
 
+            // Crouch in CAST_FINAL fires /castfinal
             case CAST_FINAL:
                 world.execute(() -> {
-                    CommandManager.get()
-                            .handleCommand(playerRef, "CastFinal");
+                    CommandManager.get().handleCommand(playerRef, "CastFinal");
                     hs.setMode(PlayerHotbarState.Mode.NONE);
+                    chat(playerRef, "#FF4500", "Fired!");
                 });
                 return true;
 
@@ -237,25 +305,34 @@ public class HotbarInputHandler implements PlayerPacketFilter {
         }
     }
 
-    // ── Player key-2: spawn / despawn NPC ────────────────────────────────────
+    // ── Player key-2: spawn NPC or re-activate move ───────────────────────────
 
     private void handlePlayerMove(PlayerRef playerRef, GridPlayerState state, World world,
                                   Ref<EntityStore> entityRef, Store<EntityStore> store) {
-        // Toggle: if NPC already active, despawn
+        // NPC already exists — only unfreeze if player is standing on same grid cell as NPC
         if (state.npcEntity != null && state.npcEntity.isValid()) {
-            state.unfreeze();
-            state.clearSpellCastingState();
-            if (state.gridOverlayEnabled) GridOverlayManager.removeGridOverlay(world, state);
-            PlayerEntityController.despawnPlayerNpc(world, state);
-            state.hotbarState.setMode(PlayerHotbarState.Mode.NONE);
-            playerRef.sendMessage(Message.raw("[Griddify] NPC despawned.").color("#FFA500"));
+            Vector3d pos = getPosition(entityRef, store);
+            if (pos == null) {
+                chat(playerRef, "#FF0000", "Could not read position!");
+                return;
+            }
+            int playerGridX = (int) Math.floor(pos.getX() / state.gridSize);
+            int playerGridZ = (int) Math.floor(pos.getZ() / state.gridSize);
+            if (playerGridX == state.currentGridX && playerGridZ == state.currentGridZ) {
+                state.unfreeze();
+                state.hotbarState.setMode(PlayerHotbarState.Mode.MOVE);
+                chat(playerRef, "#00FFFF", "[2] Move mode — walk to move. [1] to freeze.");
+            } else {
+                chat(playerRef, "#FFA500", "Walk to your NPC first (grid "
+                        + state.currentGridX + ", " + state.currentGridZ + "), then press [2].");
+            }
             return;
         }
 
-        // Get position
+        // No NPC yet — spawn one
         Vector3d pos = getPosition(entityRef, store);
         if (pos == null) {
-            playerRef.sendMessage(Message.raw("[Griddify] Could not read position!").color("#FF0000"));
+            chat(playerRef, "#FF0000", "Could not read position!");
             return;
         }
 
@@ -267,7 +344,7 @@ public class HotbarInputHandler implements PlayerPacketFilter {
                 if (held != null && !held.isEmpty()) {
                     String id = held.getItemId();
                     if (id != null && id.toLowerCase().startsWith("weapon_crossbow")) {
-                        playerRef.sendMessage(Message.raw("[Griddify] Crossbow not supported — switch weapon first.").color("#FF4500"));
+                        chat(playerRef, "#FF4500", "Crossbow not supported — switch weapon first.");
                         return;
                     }
                 }
@@ -283,9 +360,9 @@ public class HotbarInputHandler implements PlayerPacketFilter {
             gridZ = free[1];
         }
 
-        state.currentGridX       = gridX;
-        state.currentGridZ       = gridZ;
-        state.lastPlayerPosition = pos;
+        state.currentGridX        = gridX;
+        state.currentGridZ        = gridZ;
+        state.lastPlayerPosition  = pos;
         state.noMovesMessageShown = false;
 
         final int fGX = gridX, fGZ = gridZ;
@@ -302,31 +379,14 @@ public class HotbarInputHandler implements PlayerPacketFilter {
                                 500L, java.util.concurrent.TimeUnit.MILLISECONDS);
                 gridManager.spawnDirectionHolograms(world, state);
                 state.hotbarState.setMode(PlayerHotbarState.Mode.MOVE);
-                playerRef.sendMessage(Message.raw("[Griddify] NPC ready! Walk to move.").color("#00FFFF"));
+                chat(playerRef, "#00FFFF", "NPC spawned! Walk to move. [1] to freeze.");
             } else {
-                playerRef.sendMessage(Message.raw("[Griddify] Failed — no ground found below you.").color("#FF0000"));
+                chat(playerRef, "#FF0000", "Failed — no ground found below you.");
             }
         });
     }
 
-    private void resyncSlot(PlayerRef playerRef, int slot) {
-        SetActiveSlot packet = new SetActiveSlot();
-        packet.activeSlot = slot;
-        try {
-            java.lang.reflect.Method sendMethod = playerRef.getPacketHandler().getClass().getMethod("send", Packet.class);
-            sendMethod.invoke(playerRef.getPacketHandler(), packet);
-        } catch (Exception ignored) {}
-    }
-
-    private Vector3d getPosition(Ref<EntityStore> entityRef, Store<EntityStore> store) {
-        try {
-            TransformComponent tc = store.getComponent(entityRef, TransformComponent.getComponentType());
-            if (tc != null) return tc.getPosition();
-        } catch (Exception ignored) {}
-        return null;
-    }
-
-    // ── GM key-2: auto-control monster ───────────────────────────────────────
+    // ── GM key-2: auto-control monster ────────────────────────────────────────
 
     private void handleGmMove(PlayerRef playerRef, GridPlayerState state, World world) {
         int gmX = state.currentGridX;
@@ -334,64 +394,104 @@ public class HotbarInputHandler implements PlayerPacketFilter {
 
         MonsterState match = null;
         for (MonsterState m : encounterManager.getMonsters()) {
-            if (m.currentGridX == gmX && m.currentGridZ == gmZ) {
-                match = m;
-                break;
-            }
+            if (m.currentGridX == gmX && m.currentGridZ == gmZ) { match = m; break; }
         }
 
         if (match != null) {
             encounterManager.setControlled(match.monsterNumber);
             state.hotbarState.setMode(PlayerHotbarState.Mode.MOVE);
-            playerRef.sendMessage(Message.raw("[Griddify] Controlling: " + match.getDisplayName()).color("#FF69B4"));
+            chat(playerRef, "#FF69B4", "Controlling: " + match.getDisplayName());
         } else {
             MonsterState current = encounterManager.getControlledMonster();
             if (current != null) {
                 state.hotbarState.setMode(PlayerHotbarState.Mode.MOVE);
-                playerRef.sendMessage(Message.raw("[Griddify] Moving: " + current.getDisplayName()).color("#00FF7F"));
+                chat(playerRef, "#00FF7F", "Moving: " + current.getDisplayName());
             } else {
-                playerRef.sendMessage(Message.raw("[Griddify] No monster here — stand on its cell.").color("#FFA500"));
+                chat(playerRef, "#FFA500", "No monster here — stand on its grid cell.");
             }
         }
     }
 
-    // ── Spell confirm ─────────────────────────────────────────────────────────
+    // ── Chat helpers ──────────────────────────────────────────────────────────
 
-    private void confirmSpell(PlayerRef playerRef, GridPlayerState state) {
-        SpellData spell = state.hotbarState.getSelectedSpell();
-        if (spell == null) {
-            playerRef.sendMessage(Message.raw("[Griddify] No spell selected.").color("#FF0000"));
+    private static void chat(PlayerRef playerRef, String hexColor, String text) {
+        playerRef.sendMessage(Message.raw(text).color(hexColor));
+    }
+
+    private static void printSpellCursor(PlayerRef playerRef, PlayerHotbarState hs) {
+        List<SpellData> spells = hs.spellList;
+        if (spells == null || spells.isEmpty()) return;
+        SpellData sp = spells.get(hs.spellSelectIndex);
+        String dmg   = sp.getDamageDice() != null
+                ? sp.getDamageDice() + " " + sp.getDamageType().name().toLowerCase() : "effect";
+        String range = "r" + (sp.getRangeGrids() > 0 ? sp.getRangeGrids() : "T");
+        chat(playerRef, "#FFD700", "> " + sp.getName() + "  " + dmg + "  " + range
+                + "  (" + (hs.spellSelectIndex + 1) + "/" + spells.size() + ")");
+    }
+
+    private static void printSpellList(PlayerRef playerRef, GridPlayerState state) {
+        List<SpellData> spells = state.hotbarState.spellList;
+        if (spells == null || spells.isEmpty()) {
+            chat(playerRef, "#AAAAAA", "No spells loaded — press [3] first.");
             return;
         }
-        CommandManager.get()
-                .handleCommand(playerRef, "Cast " + spell.getName());
-        state.hotbarState.spellConfirmed = true;
-    }
-
-    private void cancelCastIfActive(PlayerRef playerRef, GridPlayerState state) {
-        if (state.getSpellCastingState() != null || state.hasActiveCustomCast()) {
-            CommandManager.get()
-                    .handleCommand(playerRef, "CastCancel");
+        chat(playerRef, "#FFD700", "--- SPELLS (" + spells.size() + ") ---");
+        for (int i = 0; i < spells.size(); i++) {
+            SpellData sp = spells.get(i);
+            String dmg   = sp.getDamageDice() != null ? sp.getDamageDice() : "effect";
+            String range = "r" + (sp.getRangeGrids() > 0 ? sp.getRangeGrids() : "T");
+            chat(playerRef, "#FFFFFF", (i + 1) + ". " + sp.getName() + "  " + dmg + "  " + range);
         }
-        state.hotbarState.spellConfirmed = false;
     }
 
-    // ── HUD ──────────────────────────────────────────────────────────────────
-
-    /**
-     * Called by /GridPlayer and /GridGM immediately after role assignment.
-     * Registers the HUD so it's ready for the first key press.
-     */
-    public void initHudForPlayer(PlayerRef playerRef) {
-        // HUD removed — vanilla Hytale does not support CustomUI
+    private static void printProfile(PlayerRef playerRef, GridPlayerState state) {
+        if (state.stats == null) {
+            chat(playerRef, "#AAAAAA", "No stats — use /GridClass first.");
+            return;
+        }
+        String cls = state.stats.getClassType() != null
+                ? state.stats.getClassType().getDisplayName() : "None";
+        String sub = state.stats.getSubclassType() != null
+                ? " / " + state.stats.getSubclassType().getDisplayName() : "";
+        chat(playerRef, "#00BFFF", "--- PROFILE ---");
+        chat(playerRef, "#00BFFF", cls + sub + "  Lv." + state.stats.getLevel());
+        chat(playerRef, "#FFFFFF", "HP: " + state.stats.currentHP + "/" + state.stats.maxHP
+                + "  AC: " + state.stats.armor
+                + "  Slots: " + state.stats.getRemainingSpellSlots() + "/" + state.stats.getSpellSlots());
+        chat(playerRef, "#FFFFFF", "STR " + state.stats.strength
+                + "  DEX " + state.stats.dexterity + "  CON " + state.stats.constitution
+                + "  INT " + state.stats.intelligence + "  WIS " + state.stats.wisdom
+                + "  CHA " + state.stats.charisma);
+        chat(playerRef, "#FFFFFF", "Moves: " + state.maxMoves
+                + "  Init: " + (state.stats.initiative >= 0 ? "+" : "") + state.stats.initiative);
     }
 
-    /**
-     * Called by PlayerDisconnectListener when a player leaves the server.
-     * Cleans up local state for that player.
-     */
+    // ── No-op HUD stub ────────────────────────────────────────────────────────
+
+    /** Called by GMCommand/GridPlayerCommand — no-op, no CustomUI. */
+    public void initHudForPlayer(PlayerRef playerRef) {}
+
     public void onPlayerDisconnect(PlayerRef playerRef) {
         wasSneaking.remove(playerRef.getUuid());
     }
 
+    // ── Utilities ─────────────────────────────────────────────────────────────
+
+    private static void resyncSlot(PlayerRef playerRef, int slot) {
+        SetActiveSlot packet = new SetActiveSlot();
+        packet.activeSlot = slot;
+        try {
+            java.lang.reflect.Method sendMethod =
+                    playerRef.getPacketHandler().getClass().getMethod("send", Packet.class);
+            sendMethod.invoke(playerRef.getPacketHandler(), packet);
+        } catch (Exception ignored) {}
+    }
+
+    private static Vector3d getPosition(Ref<EntityStore> entityRef, Store<EntityStore> store) {
+        try {
+            TransformComponent tc = store.getComponent(entityRef, TransformComponent.getComponentType());
+            return tc != null ? tc.getPosition() : null;
+        } catch (Exception ignored) {}
+        return null;
+    }
 }

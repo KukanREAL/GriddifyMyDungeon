@@ -17,13 +17,14 @@ public class PlayerHotbarState {
 
     // ── Hotbar modes ──────────────────────────────────────────────────────────
     public enum Mode {
-        NONE,          // Key 1 — nothing active, panel hidden
+        NONE,          // Key 1 — nothing active, NPC frozen
         MOVE,          // Key 2 — movement mode active
         SPELL_SELECT,  // Key 3 — selecting spell (crouch scrolls)
-        LIST_SPELLS,   // Key 4 — read-only spell list
-        CAST_FINAL,    // Key 5 — armed, crouch fires /castfinal
-        TARGETING,     // Key 6 — armed, crouch confirms /casttarget
-        PROFILE        // Key 7 — profile panel
+        CONFIRM,       // Key 4 — spell confirmed, crouch fires /cast <spell>
+        TARGETING,     // Key 5 — crouch fires /casttarget
+        CAST_FINAL,    // Key 6 — crouch fires /castfinal
+        PROFILE,       // Key 7 — profile printed to chat
+        LIST_SPELLS    // Key 8 — spell list printed to chat
     }
 
     // Current active mode
@@ -43,8 +44,7 @@ public class PlayerHotbarState {
 
     public void setMode(Mode mode) {
         this.activeMode = mode;
-        // Reset spell selection state when leaving SPELL_SELECT
-        if (mode != Mode.SPELL_SELECT) {
+        if (mode == Mode.NONE || mode == Mode.MOVE) {
             spellConfirmed = false;
         }
     }
