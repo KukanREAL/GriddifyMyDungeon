@@ -66,7 +66,6 @@ public class HotbarInputHandler implements PlayerPacketFilter {
     private final RoleManager        roleManager;
     private final CollisionDetector  collisionDetector;
 
-    private final Map<UUID, GriddifyHud> huds        = new HashMap<>();
     private final Map<UUID, Boolean>     wasSneaking = new HashMap<>();
 
     public HotbarInputHandler(GridMoveManager gridManager, EncounterManager encounterManager,
@@ -197,7 +196,6 @@ public class HotbarInputHandler implements PlayerPacketFilter {
                     break;
             }
 
-            refreshHud(playerRef, state, entityRef, store);
         });
     }
 
@@ -216,7 +214,6 @@ public class HotbarInputHandler implements PlayerPacketFilter {
             case SPELL_SELECT:
                 world.execute(() -> {
                     hs.advanceSpellIndex();
-                    refreshHud(playerRef, state, entityRef, store);
                 });
                 return true;
 
@@ -224,7 +221,6 @@ public class HotbarInputHandler implements PlayerPacketFilter {
                 world.execute(() -> {
                     CommandManager.get()
                             .handleCommand(playerRef, "CastTarget");
-                    refreshHud(playerRef, state, entityRef, store);
                 });
                 return true;
 
@@ -233,7 +229,6 @@ public class HotbarInputHandler implements PlayerPacketFilter {
                     CommandManager.get()
                             .handleCommand(playerRef, "CastFinal");
                     hs.setMode(PlayerHotbarState.Mode.NONE);
-                    refreshHud(playerRef, state, entityRef, store);
                 });
                 return true;
 
@@ -314,6 +309,23 @@ public class HotbarInputHandler implements PlayerPacketFilter {
         });
     }
 
+    private void resyncSlot(PlayerRef playerRef, int slot) {
+        SetActiveSlot packet = new SetActiveSlot();
+        packet.activeSlot = slot;
+        try {
+            java.lang.reflect.Method sendMethod = playerRef.getPacketHandler().getClass().getMethod("send", Packet.class);
+            sendMethod.invoke(playerRef.getPacketHandler(), packet);
+        } catch (Exception ignored) {}
+    }
+
+    private Vector3d getPosition(Ref<EntityStore> entityRef, Store<EntityStore> store) {
+        try {
+            TransformComponent tc = store.getComponent(entityRef, TransformComponent.getComponentType());
+            if (tc != null) return tc.getPosition();
+        } catch (Exception ignored) {}
+        return null;
+    }
+
     // ── GM key-2: auto-control monster ───────────────────────────────────────
 
     private void handleGmMove(PlayerRef playerRef, GridPlayerState state, World world) {
@@ -371,59 +383,15 @@ public class HotbarInputHandler implements PlayerPacketFilter {
      * Registers the HUD so it's ready for the first key press.
      */
     public void initHudForPlayer(PlayerRef playerRef) {
-        Ref<EntityStore> entityRef = playerRef.getReference();
-        if (entityRef == null || !entityRef.isValid()) return;
-        Store<EntityStore> store = entityRef.getStore();
-        store.getExternalData().getWorld().execute(() -> {
-            if (gridManager.getState(playerRef) == null) return;
-            getOrCreateHud(playerRef, entityRef, store);
-        });
+        // HUD removed — vanilla Hytale does not support CustomUI
     }
 
-    private void refreshHud(PlayerRef playerRef, GridPlayerState state,
-                            Ref<EntityStore> entityRef, Store<EntityStore> store) {
-        GriddifyHud hud = getOrCreateHud(playerRef, entityRef, store);
-        if (hud == null) return;
-        hud.updatePanel(state, encounterManager, roleManager);
-    }
-
-    private GriddifyHud getOrCreateHud(PlayerRef playerRef,
-                                       Ref<EntityStore> entityRef, Store<EntityStore> store) {
-        UUID uuid = playerRef.getUuid();
-        GriddifyHud hud = huds.get(uuid);
-        if (hud != null) return hud;
-
-        hud = new GriddifyHud(playerRef);
-        huds.put(uuid, hud);
-        try {
-            Player player = store.getComponent(entityRef, Player.getComponentType());
-            if (player != null) player.getHudManager().setCustomHud(playerRef, hud);
-        } catch (Exception e) {
-            System.err.println("[Griddify] [HUD] Failed for " + playerRef.getUsername() + ": " + e.getMessage());
-            huds.remove(uuid);
-            return null;
-        }
-        return hud;
-    }
-
+    /**
+     * Called by PlayerDisconnectListener when a player leaves the server.
+     * Cleans up local state for that player.
+     */
     public void onPlayerDisconnect(PlayerRef playerRef) {
-        huds.remove(playerRef.getUuid());
         wasSneaking.remove(playerRef.getUuid());
-        GridPlayerState state = gridManager.getState(playerRef);
-        if (state != null) state.hotbarState.reset();
     }
 
-    // ── Utilities ────────────────────────────────────────────────────────────
-
-    private static void resyncSlot(PlayerRef playerRef, int slot) {
-        try { playerRef.getPacketHandler().write(new SetActiveSlot(Inventory.HOTBAR_SECTION_ID, slot)); }
-        catch (Exception ignored) {}
-    }
-
-    private static Vector3d getPosition(Ref<EntityStore> entityRef, Store<EntityStore> store) {
-        try {
-            TransformComponent t = store.getComponent(entityRef, TransformComponent.getComponentType());
-            return t != null ? t.getPosition() : null;
-        } catch (Exception e) { return null; }
-    }
 }
