@@ -32,9 +32,7 @@ import java.util.List;
 public class GriddifyHud extends CustomUIHud {
 
     private static final int MAX_LINES = 12;
-    private static final String UI_FILE = "GriddifyPanel.ui";
 
-    private final PlayerRef playerRef;
 
     // ── Colors ─────────────────────────────────────────────────────────────────
     private static final String COLOR_TITLE      = "#FFD700"; // gold
@@ -47,13 +45,30 @@ public class GriddifyHud extends CustomUIHud {
     private static final String COLOR_PROFILE    = "#00BFFF"; // deep sky blue
     private static final String COLOR_ARMED      = "#FF4500"; // orange-red
 
-    public GriddifyHud(PlayerRef playerRef) {
-        this.playerRef = playerRef;
+    public GriddifyHud(@Nonnull PlayerRef playerRef) {
+        super(playerRef);
     }
 
     @Override
     public void build(@Nonnull UICommandBuilder uiCommandBuilder) {
-        uiCommandBuilder.append(UI_FILE);
+        // Fully inline - no external .ui file required on vanilla Hytale client
+        uiCommandBuilder.appendInline(null,
+                "Group #GriddifyRoot { Anchor: (Left: 12, Top: 12); LayoutMode: Top; "
+                        + "Label #PanelTitle { Style: (FontSize: 14, Alignment: Left); Anchor: (Width: 320, Height: 22); Text: \"\"; } "
+                        + "Label #PanelSub { Style: (FontSize: 11, Alignment: Left); Anchor: (Width: 320, Height: 18); Text: \"\"; } "
+                        + "Label #Line1  { Style: (FontSize: 11, Alignment: Left); Anchor: (Width: 320, Height: 17); Text: \"\"; } "
+                        + "Label #Line2  { Style: (FontSize: 11, Alignment: Left); Anchor: (Width: 320, Height: 17); Text: \"\"; } "
+                        + "Label #Line3  { Style: (FontSize: 11, Alignment: Left); Anchor: (Width: 320, Height: 17); Text: \"\"; } "
+                        + "Label #Line4  { Style: (FontSize: 11, Alignment: Left); Anchor: (Width: 320, Height: 17); Text: \"\"; } "
+                        + "Label #Line5  { Style: (FontSize: 11, Alignment: Left); Anchor: (Width: 320, Height: 17); Text: \"\"; } "
+                        + "Label #Line6  { Style: (FontSize: 11, Alignment: Left); Anchor: (Width: 320, Height: 17); Text: \"\"; } "
+                        + "Label #Line7  { Style: (FontSize: 11, Alignment: Left); Anchor: (Width: 320, Height: 17); Text: \"\"; } "
+                        + "Label #Line8  { Style: (FontSize: 11, Alignment: Left); Anchor: (Width: 320, Height: 17); Text: \"\"; } "
+                        + "Label #Line9  { Style: (FontSize: 11, Alignment: Left); Anchor: (Width: 320, Height: 17); Text: \"\"; } "
+                        + "Label #Line10 { Style: (FontSize: 11, Alignment: Left); Anchor: (Width: 320, Height: 17); Text: \"\"; } "
+                        + "Label #Line11 { Style: (FontSize: 11, Alignment: Left); Anchor: (Width: 320, Height: 17); Text: \"\"; } "
+                        + "Label #Line12 { Style: (FontSize: 11, Alignment: Left); Anchor: (Width: 320, Height: 17); Text: \"\"; } "
+                        + "}");
     }
 
     // ── Public update entry point ──────────────────────────────────────────────
@@ -101,7 +116,7 @@ public class GriddifyHud extends CustomUIHud {
                           RoleManager roleManager) {
         List<String> lines = new ArrayList<>();
         MonsterState controlled = encounterManager.getControlledMonster();
-        if (controlled != null && roleManager.isGM(playerRef)) {
+        if (controlled != null && roleManager.isGM(getPlayerRef())) {
             lines.add(COLOR_MOVE + "MOVE: " + controlled.getDisplayName());
             lines.add(COLOR_SUBTITLE + "Moves: " + fmt(controlled.remainingMoves)
                     + "/" + fmt(controlled.maxMoves));

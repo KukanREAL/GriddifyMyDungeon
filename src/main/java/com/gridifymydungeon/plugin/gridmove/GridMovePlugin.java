@@ -135,9 +135,6 @@ public class GridMovePlugin extends JavaPlugin {
         GridPlayerCommand gridPlayerCmd = new GridPlayerCommand(roleManager);
         getCommandRegistry().registerCommand(gmCmd);
         getCommandRegistry().registerCommand(gridPlayerCmd);
-        // Wire HUD init — set after hotbarInputHandler is constructed (in registerPacketHandlers)
-        gmCmdRef = gmCmd;
-        gridPlayerCmdRef = gridPlayerCmd;
         getCommandRegistry().registerCommand(new GridNullCommand(roleManager));
         getCommandRegistry().registerCommand(new GridRestartCommand(roleManager));
 
@@ -233,8 +230,8 @@ public class GridMovePlugin extends JavaPlugin {
                 gridMoveManager, encounterManager, spellVisualManager, roleManager, collisionDetector);
         hotbarPacketFilter = PacketAdapters.registerInbound(hotbarInputHandler);
         disconnectListener.setHotbarInputHandler(hotbarInputHandler);
-        if (gmCmdRef        != null) gmCmdRef.setHotbarInputHandler(hotbarInputHandler);
-        if (gridPlayerCmdRef != null) gridPlayerCmdRef.setHotbarInputHandler(hotbarInputHandler);
+        gmCmd.setHotbarInputHandler(hotbarInputHandler);
+        gridPlayerCmd.setHotbarInputHandler(hotbarInputHandler);
 
         getLogger().at(Level.INFO).log("Registered all commands successfully!");
     }
