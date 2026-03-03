@@ -18,21 +18,34 @@ import java.util.List;
 /**
  * Top-left HUD panel for Griddify.
  *
- * One instance per player. Shows different content depending on the active
- * hotbar mode stored in GridPlayerState.hotbarState.
+ * Built entirely inline — no external .ui file needed on the client.
  *
- * Usage:
- *   GriddifyHud hud = new GriddifyHud(playerRef);
- *   player.getHudManager().setCustomHud(entityRef, store, hud);
- *   hud.updatePanel(state, encounterManager, roleManager);
- *
- * To hide the panel entirely:
- *   hud.clearPanel();
+ * The first send() call uses clear=true and prepends the appendInline command
+ * so the DOM elements are created before values are set.
+ * All subsequent calls use clear=false and just update the existing elements.
  */
 public class GriddifyHud extends CustomUIHud {
 
     private static final int MAX_LINES = 12;
 
+    // Inline panel markup — no .ui file required
+    private static final String PANEL_INLINE =
+            "Group #GriddifyRoot { Anchor: (Left: 12, Top: 12); LayoutMode: Top; "
+                    + "Label #PanelTitle { Style: (FontSize: 14, Alignment: Left); Anchor: (Width: 320, Height: 22); Text: \"\"; } "
+                    + "Label #PanelSub   { Style: (FontSize: 11, Alignment: Left); Anchor: (Width: 320, Height: 18); Text: \"\"; } "
+                    + "Label #Line1  { Style: (FontSize: 11, Alignment: Left); Anchor: (Width: 320, Height: 17); Text: \"\"; } "
+                    + "Label #Line2  { Style: (FontSize: 11, Alignment: Left); Anchor: (Width: 320, Height: 17); Text: \"\"; } "
+                    + "Label #Line3  { Style: (FontSize: 11, Alignment: Left); Anchor: (Width: 320, Height: 17); Text: \"\"; } "
+                    + "Label #Line4  { Style: (FontSize: 11, Alignment: Left); Anchor: (Width: 320, Height: 17); Text: \"\"; } "
+                    + "Label #Line5  { Style: (FontSize: 11, Alignment: Left); Anchor: (Width: 320, Height: 17); Text: \"\"; } "
+                    + "Label #Line6  { Style: (FontSize: 11, Alignment: Left); Anchor: (Width: 320, Height: 17); Text: \"\"; } "
+                    + "Label #Line7  { Style: (FontSize: 11, Alignment: Left); Anchor: (Width: 320, Height: 17); Text: \"\"; } "
+                    + "Label #Line8  { Style: (FontSize: 11, Alignment: Left); Anchor: (Width: 320, Height: 17); Text: \"\"; } "
+                    + "Label #Line9  { Style: (FontSize: 11, Alignment: Left); Anchor: (Width: 320, Height: 17); Text: \"\"; } "
+                    + "Label #Line10 { Style: (FontSize: 11, Alignment: Left); Anchor: (Width: 320, Height: 17); Text: \"\"; } "
+                    + "Label #Line11 { Style: (FontSize: 11, Alignment: Left); Anchor: (Width: 320, Height: 17); Text: \"\"; } "
+                    + "Label #Line12 { Style: (FontSize: 11, Alignment: Left); Anchor: (Width: 320, Height: 17); Text: \"\"; } "
+                    + "}";
 
     // ── Colors ─────────────────────────────────────────────────────────────────
     private static final String COLOR_TITLE      = "#FFD700"; // gold
@@ -45,38 +58,34 @@ public class GriddifyHud extends CustomUIHud {
     private static final String COLOR_PROFILE    = "#00BFFF"; // deep sky blue
     private static final String COLOR_ARMED      = "#FF4500"; // orange-red
 
+    // Track whether DOM has been built yet for this player
+    private boolean domBuilt = false;
+
     public GriddifyHud(@Nonnull PlayerRef playerRef) {
         super(playerRef);
     }
 
+    /**
+     * Override show() to do nothing.
+     * We never call show() — DOM is built lazily on the first updatePanel() call.
+     * This prevents "Failed to load CustomUI documents" on join/registration.
+     */
+    @Override
+    public void show() {
+        // intentionally empty — DOM built on first send()
+    }
+
+    /**
+     * Required by CustomUIHud but never called (show() is a no-op).
+     * Left here in case the engine calls it directly.
+     */
     @Override
     public void build(@Nonnull UICommandBuilder uiCommandBuilder) {
-        // Fully inline - no external .ui file required on vanilla Hytale client
-        uiCommandBuilder.appendInline(null,
-                "Group #GriddifyRoot { Anchor: (Left: 12, Top: 12); LayoutMode: Top; "
-                        + "Label #PanelTitle { Style: (FontSize: 14, Alignment: Left); Anchor: (Width: 320, Height: 22); Text: \"\"; } "
-                        + "Label #PanelSub { Style: (FontSize: 11, Alignment: Left); Anchor: (Width: 320, Height: 18); Text: \"\"; } "
-                        + "Label #Line1  { Style: (FontSize: 11, Alignment: Left); Anchor: (Width: 320, Height: 17); Text: \"\"; } "
-                        + "Label #Line2  { Style: (FontSize: 11, Alignment: Left); Anchor: (Width: 320, Height: 17); Text: \"\"; } "
-                        + "Label #Line3  { Style: (FontSize: 11, Alignment: Left); Anchor: (Width: 320, Height: 17); Text: \"\"; } "
-                        + "Label #Line4  { Style: (FontSize: 11, Alignment: Left); Anchor: (Width: 320, Height: 17); Text: \"\"; } "
-                        + "Label #Line5  { Style: (FontSize: 11, Alignment: Left); Anchor: (Width: 320, Height: 17); Text: \"\"; } "
-                        + "Label #Line6  { Style: (FontSize: 11, Alignment: Left); Anchor: (Width: 320, Height: 17); Text: \"\"; } "
-                        + "Label #Line7  { Style: (FontSize: 11, Alignment: Left); Anchor: (Width: 320, Height: 17); Text: \"\"; } "
-                        + "Label #Line8  { Style: (FontSize: 11, Alignment: Left); Anchor: (Width: 320, Height: 17); Text: \"\"; } "
-                        + "Label #Line9  { Style: (FontSize: 11, Alignment: Left); Anchor: (Width: 320, Height: 17); Text: \"\"; } "
-                        + "Label #Line10 { Style: (FontSize: 11, Alignment: Left); Anchor: (Width: 320, Height: 17); Text: \"\"; } "
-                        + "Label #Line11 { Style: (FontSize: 11, Alignment: Left); Anchor: (Width: 320, Height: 17); Text: \"\"; } "
-                        + "Label #Line12 { Style: (FontSize: 11, Alignment: Left); Anchor: (Width: 320, Height: 17); Text: \"\"; } "
-                        + "}");
+        uiCommandBuilder.appendInline(null, PANEL_INLINE);
     }
 
     // ── Public update entry point ──────────────────────────────────────────────
 
-    /**
-     * Refresh the panel for the given player state and mode.
-     * Call from world thread after any state change.
-     */
     public void updatePanel(GridPlayerState state, EncounterManager encounterManager,
                             RoleManager roleManager) {
         PlayerHotbarState hs = state.hotbarState;
@@ -138,7 +147,6 @@ public class GriddifyHud extends CustomUIHud {
         if (spells.isEmpty()) {
             lines.add(COLOR_SUBTITLE + "(No spells available)");
         } else {
-            // Show only the currently highlighted spell with full detail
             SpellData sp = spells.get(hs.spellSelectIndex);
             String cost  = sp.getSlotCost() > 0 ? sp.getSlotCost() + " slot(s)" : "cantrip";
             String range = sp.getRangeGrids() > 0 ? sp.getRangeGrids() + " grids" : "Touch";
@@ -151,17 +159,16 @@ public class GriddifyHud extends CustomUIHud {
             lines.add(COLOR_SUBTITLE + "dmg: " + dmg);
             lines.add(COLOR_SUBTITLE + sp.getPattern().name().toLowerCase());
             lines.add("");
-            // Mini nav: prev / current / next names
             if (spells.size() > 1) {
                 int prev = (hs.spellSelectIndex - 1 + spells.size()) % spells.size();
                 int next = (hs.spellSelectIndex + 1) % spells.size();
                 lines.add(COLOR_SUBTITLE + "  " + spells.get(prev).getName());
-                lines.add(COLOR_SPELL_SEL + "▶ " + sp.getName()
+                lines.add(COLOR_SPELL_SEL + "> " + sp.getName()
                         + "  (" + (hs.spellSelectIndex + 1) + "/" + spells.size() + ")");
                 lines.add(COLOR_SUBTITLE + "  " + spells.get(next).getName());
             }
         }
-        send("⚔ SELECT SPELL", COLOR_SUBTITLE + "Crouch:scroll  [3]:cast  [1]:cancel", lines);
+        send("SELECT SPELL", COLOR_SUBTITLE + "Crouch:scroll  [3]:cast  [1]:cancel", lines);
     }
 
     private void showCastStatus(GridPlayerState state) {
@@ -189,7 +196,7 @@ public class GriddifyHud extends CustomUIHud {
         }
         lines.add(COLOR_SUBTITLE + "[5]+crouch: FIRE");
         lines.add(COLOR_SUBTITLE + "[1]: cancel");
-        send("⚔ CASTING", null, lines);
+        send("CASTING", null, lines);
     }
 
     private void showSpellList(GridPlayerState state, EncounterManager encounterManager,
@@ -197,9 +204,8 @@ public class GriddifyHud extends CustomUIHud {
         List<SpellData> spells = buildSpellList(state, encounterManager, roleManager);
         List<String> lines = new ArrayList<>();
         if (spells.isEmpty()) {
-            lines.add(COLOR_SUBTITLE + "(No spells — use /GridClass first)");
+            lines.add(COLOR_SUBTITLE + "(No spells - use /GridClass first)");
         } else {
-            // Compact: one line per spell — name  dmg-roll  rN
             for (int i = 0; i < spells.size() && i < MAX_LINES; i++) {
                 SpellData sp = spells.get(i);
                 String dmg   = sp.getDamageDice() != null ? sp.getDamageDice() : "effect";
@@ -208,13 +214,13 @@ public class GriddifyHud extends CustomUIHud {
             }
             if (spells.size() > MAX_LINES) {
                 lines.set(MAX_LINES - 1,
-                        COLOR_SUBTITLE + "+" + (spells.size() - MAX_LINES + 1) + " more — /listspells");
+                        COLOR_SUBTITLE + "+" + (spells.size() - MAX_LINES + 1) + " more - /listspells");
             }
         }
         String slots = (state.stats != null)
                 ? "Slots " + state.stats.getRemainingSpellSlots() + "/" + state.stats.getSpellSlots() + "  "
                 : "";
-        send("📜 SPELLS", COLOR_SUBTITLE + slots + "[1]:close", lines);
+        send("SPELLS", COLOR_SUBTITLE + slots + "[1]:close", lines);
     }
 
     private void showCastFinalArmed(GridPlayerState state) {
@@ -223,7 +229,7 @@ public class GriddifyHud extends CustomUIHud {
         List<String> lines = new ArrayList<>();
         lines.add(COLOR_ARMED + "Crouch to FIRE!");
         lines.add(COLOR_SUBTITLE + "[1]: abort");
-        send("🔴 ARMED: " + spellName, null, lines);
+        send("ARMED: " + spellName, null, lines);
     }
 
     private void showTargeting(GridPlayerState state) {
@@ -239,13 +245,13 @@ public class GriddifyHud extends CustomUIHud {
         } else {
             lines.add(COLOR_SUBTITLE + "Crouch: confirm target");
         }
-        send("🎯 TARGETING", null, lines);
+        send("TARGETING", null, lines);
     }
 
     private void showProfile(GridPlayerState state) {
         List<String> lines = new ArrayList<>();
         if (state.stats == null) {
-            lines.add(COLOR_SUBTITLE + "(No stats — use /GridClass)");
+            lines.add(COLOR_SUBTITLE + "(No stats - use /GridClass)");
         } else {
             String className = state.stats.getClassType() != null
                     ? state.stats.getClassType().getDisplayName() : "None";
@@ -266,35 +272,39 @@ public class GriddifyHud extends CustomUIHud {
             lines.add(COLOR_SPELL_NORM + "Moves: " + fmt(state.maxMoves));
         }
         lines.add(COLOR_SUBTITLE + "[1]: close");
-        send("👤 PROFILE", null, lines);
+        send("PROFILE", null, lines);
     }
 
     // ── Panel clear ────────────────────────────────────────────────────────────
 
-    /** Hide the panel (set all labels to empty). */
     public void clearPanel() {
+        // If DOM not yet built, nothing to clear — just reset the flag
+        if (!domBuilt) return;
         send(null, null, new ArrayList<>());
     }
 
     // ── Internal send helper ───────────────────────────────────────────────────
 
     /**
-     * Push an update to the client.
-     * title/subtitle are format strings like "#FF0000text" — the first 7 chars are the hex color.
-     * lines is a List of the same format, padded/trimmed to MAX_LINES.
+     * On first call (domBuilt=false): sends clear=true + appendInline to build the DOM,
+     * then all the set() commands to populate it — all in one packet.
+     * On subsequent calls: sends clear=false + only the set() commands.
      */
     private void send(String title, String subtitle, List<String> lines) {
         UICommandBuilder cmd = new UICommandBuilder();
 
-        // Title
+        boolean firstSend = !domBuilt;
+        if (firstSend) {
+            // First send: build the DOM inline then set values in the same packet
+            cmd.appendInline(null, PANEL_INLINE);
+            domBuilt = true;
+        }
+
         cmd.set("#PanelTitle.TextSpans",
                 title != null ? coloredMsg(title) : Message.raw(""));
-
-        // Subtitle
         cmd.set("#PanelSub.TextSpans",
                 subtitle != null ? coloredMsg(subtitle) : Message.raw(""));
 
-        // Lines 1–12
         for (int i = 1; i <= MAX_LINES; i++) {
             String lineId = "#Line" + i + ".TextSpans";
             if (i - 1 < lines.size()) {
@@ -304,33 +314,25 @@ public class GriddifyHud extends CustomUIHud {
             }
         }
 
-        update(false, cmd);
+        // First send: clear=true (rebuild DOM); subsequent: clear=false
+        update(firstSend, cmd);
     }
 
-    /**
-     * Parse a line string of the form "#RRGGBB text..." into a colored Message.
-     * If the string starts with '#' and has at least 7 chars, the first 7 are the color.
-     */
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
     private static Message coloredMsg(String s) {
         if (s != null && s.startsWith("#") && s.length() > 7) {
-            String color = s.substring(0, 7);
-            String text  = s.substring(7);
-            return Message.raw(text).color(color);
+            return Message.raw(s.substring(7)).color(s.substring(0, 7));
         }
         return Message.raw(s != null ? s : "");
     }
 
-    // ── Spell list builder (mirrors ListSpellsCommand logic) ──────────────────
-
-    /** Build the flat spell list for the current player/monster. */
     static List<SpellData> buildSpellList(GridPlayerState state, EncounterManager encounterManager,
                                           RoleManager roleManager) {
-        // Called statically from HotbarInputHandler too for spell caching
         List<SpellData> result = new ArrayList<>();
         MonsterState monster = encounterManager != null ? encounterManager.getControlledMonster() : null;
 
         if (monster != null) {
-            // GM controlling monster: monster attacks + class spells if any
             com.gridifymydungeon.plugin.spell.MonsterType mType = monster.monsterType;
             if (mType != null) {
                 result.addAll(SpellDatabase.getAttacksForMonsterType(mType));
@@ -341,7 +343,7 @@ public class GriddifyHud extends CustomUIHud {
                         monster.stats.getSubclassType(),
                         Math.max(1, monster.stats.getLevel())));
             }
-        } else if (state.stats.getClassType() != null) {
+        } else if (state.stats != null && state.stats.getClassType() != null) {
             result.addAll(SpellDatabase.getAvailableSpells(
                     state.stats.getClassType(),
                     state.stats.getSubclassType(),
@@ -349,8 +351,6 @@ public class GriddifyHud extends CustomUIHud {
         }
         return result;
     }
-
-    // ── Formatting helpers ────────────────────────────────────────────────────
 
     private static String fmt(double d) {
         if (d == Math.floor(d)) return String.valueOf((int) d);
