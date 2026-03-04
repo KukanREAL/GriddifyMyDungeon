@@ -2,133 +2,133 @@ Group #GriddifyRoot {
   LayoutMode: Top;
   Anchor: (Left: 12, Top: 12, Width: 700);
   Label #PanelTitle {
-    Style: (FontSize: 42);
-    Anchor: (Height: 60);
+    Style: (FontSize: 29);
+    Anchor: (Height: 42);
     Text: "Griddify";
   }
   Label #PanelSub {
-    Style: (FontSize: 33);
-    Anchor: (Height: 50);
+    Style: (FontSize: 23);
+    Anchor: (Height: 35);
     Text: "";
   }
   Label #Line1 {
-    Style: (FontSize: 33);
-    Anchor: (Height: 48);
+    Style: (FontSize: 23);
+    Anchor: (Height: 34);
     Text: "";
   }
   Label #Line2 {
-    Style: (FontSize: 33);
-    Anchor: (Height: 48);
+    Style: (FontSize: 23);
+    Anchor: (Height: 34);
     Text: "";
   }
   Label #Line3 {
-    Style: (FontSize: 33);
-    Anchor: (Height: 48);
+    Style: (FontSize: 23);
+    Anchor: (Height: 34);
     Text: "";
   }
   Label #Line4 {
-    Style: (FontSize: 33);
-    Anchor: (Height: 48);
+    Style: (FontSize: 23);
+    Anchor: (Height: 34);
     Text: "";
   }
   Label #Line5 {
-    Style: (FontSize: 33);
-    Anchor: (Height: 48);
+    Style: (FontSize: 23);
+    Anchor: (Height: 34);
     Text: "";
   }
   Label #Line6 {
-    Style: (FontSize: 33);
-    Anchor: (Height: 48);
+    Style: (FontSize: 23);
+    Anchor: (Height: 34);
     Text: "";
   }
   Label #Line7 {
-    Style: (FontSize: 33);
-    Anchor: (Height: 48);
+    Style: (FontSize: 23);
+    Anchor: (Height: 34);
     Text: "";
   }
   Label #Line8 {
-    Style: (FontSize: 33);
-    Anchor: (Height: 48);
+    Style: (FontSize: 23);
+    Anchor: (Height: 34);
     Text: "";
   }
   Label #Line9 {
-    Style: (FontSize: 33);
-    Anchor: (Height: 48);
+    Style: (FontSize: 23);
+    Anchor: (Height: 34);
     Text: "";
   }
   Label #Line10 {
-    Style: (FontSize: 33);
-    Anchor: (Height: 48);
+    Style: (FontSize: 23);
+    Anchor: (Height: 34);
     Text: "";
   }
   Label #Line11 {
-    Style: (FontSize: 33);
-    Anchor: (Height: 48);
+    Style: (FontSize: 23);
+    Anchor: (Height: 34);
     Text: "";
   }
   Label #Line12 {
-    Style: (FontSize: 33);
-    Anchor: (Height: 48);
+    Style: (FontSize: 23);
+    Anchor: (Height: 34);
     Text: "";
   }
 }
 
 Group #HotkeyPanel {
   LayoutMode: Top;
-  Anchor: (Right: 12, Top: 12, Width: 380);
+  Anchor: (Right: 12, Top: 12, Width: 270);
   Label #HotkeyTitle {
-    Style: (FontSize: 36);
-    Anchor: (Height: 52);
+    Style: (FontSize: 25);
+    Anchor: (Height: 37);
     Text: "HOTBAR KEYS";
   }
   Label #HK1 {
-    Style: (FontSize: 28);
-    Anchor: (Height: 42);
+    Style: (FontSize: 20);
+    Anchor: (Height: 30);
     Text: "[1]  Cancel / Deactivate";
   }
   Label #HK2 {
-    Style: (FontSize: 28);
-    Anchor: (Height: 42);
+    Style: (FontSize: 20);
+    Anchor: (Height: 30);
     Text: "[2]  Move Mode";
   }
   Label #HK3 {
-    Style: (FontSize: 28);
-    Anchor: (Height: 42);
+    Style: (FontSize: 20);
+    Anchor: (Height: 30);
     Text: "[3]  Select Spell";
   }
   Label #HK4 {
-    Style: (FontSize: 28);
-    Anchor: (Height: 42);
+    Style: (FontSize: 20);
+    Anchor: (Height: 30);
     Text: "[4]  Confirm Spell";
   }
   Label #HK5 {
-    Style: (FontSize: 28);
-    Anchor: (Height: 42);
+    Style: (FontSize: 20);
+    Anchor: (Height: 30);
     Text: "[5]  Add Target";
   }
   Label #HK6 {
-    Style: (FontSize: 28);
-    Anchor: (Height: 42);
+    Style: (FontSize: 20);
+    Anchor: (Height: 30);
     Text: "[6]  Cast / Fire";
   }
   Label #HK7 {
-    Style: (FontSize: 28);
-    Anchor: (Height: 42);
+    Style: (FontSize: 20);
+    Anchor: (Height: 30);
     Text: "[7]  Profile";
   }
   Label #HK8 {
-    Style: (FontSize: 28);
-    Anchor: (Height: 42);
+    Style: (FontSize: 20);
+    Anchor: (Height: 30);
     Text: "[8]  Spell List";
   }
   Label #HK9 {
-    Style: (FontSize: 28);
-    Anchor: (Height: 42);
+    Style: (FontSize: 20);
+    Anchor: (Height: 30);
     Text: "[9]  End Turn";
   }
   Label #HKCrouch {
-    Style: (FontSize: 24);
-    Anchor: (Height: 38);
+    Style: (FontSize: 17);
+    Anchor: (Height: 27);
     Text: "Crouch = Confirm / Scroll";
   }
 }
