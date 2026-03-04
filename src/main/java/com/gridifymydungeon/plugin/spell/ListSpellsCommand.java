@@ -147,7 +147,7 @@ public class ListSpellsCommand extends AbstractPlayerCommand {
 
     private void footer(PlayerRef p, int total) {
         p.sendMessage(Message.raw("  Total: " + total + " actions available").color("#FFFFFF"));
-        p.sendMessage(Message.raw("  Use /Cast <name> to prepare a spell/attack").color("#00FF00"));
+        p.sendMessage(Message.raw("  Use /Cast <n> to prepare a spell/attack").color("#00FF00"));
         p.sendMessage(Message.raw("=========================================").color("#FFD700"));
     }
 
@@ -155,17 +155,43 @@ public class ListSpellsCommand extends AbstractPlayerCommand {
 
     /** Print a spell entry. Pass equippedWeapon (storedRightHand) to show weapon context on basic attacks. */
     private void printSpell(PlayerRef p, SpellData spell, String equippedWeapon) {
-        String cost = spell.getSlotCost() > 0 ? " (Lv." + spell.getSpellLevel() + " | " + spell.getSlotCost() + " slots)" : " (cantrip)";
-        String range = " | range " + (spell.getRangeGrids() > 0 ? spell.getRangeGrids() + "g" : "touch");
-        // For basic attacks (no slot cost, range ≤ 1 or is bow), add weapon context
+        String cost = spell.getSlotCost() > 0
+                ? " (Lv." + spell.getSpellLevel() + " | " + spell.getSlotCost() + " slots)"
+                : " (cantrip)";
+
+        // Format range: pattern name for AoE, range:X for single target
+        String range;
+        SpellPattern pat = spell.getPattern();
+        switch (pat) {
+            case CONE:     range = "CONE";     break;
+            case LINE:     range = "LINE";     break;
+            case SPHERE:   range = "SPHERE";   break;
+            case CYLINDER: range = "CYLINDER"; break;
+            case CUBE:     range = "CUBE";     break;
+            case AURA:     range = "AURA";     break;
+            case CHAIN:    range = "CHAIN";    break;
+            case WALL:     range = "WALL";     break;
+            case SELF:     range = "SELF";     break;
+            default: // SINGLE_TARGET
+                range = "range:" + (spell.getRangeGrids() > 0 ? spell.getRangeGrids() : "touch");
+                break;
+        }
+
+        String targets = spell.getMaxTargets() > 1
+                ? " | hits:" + spell.getMaxTargets()
+                : "";
+
+        // For basic attacks (no slot cost), add weapon context
         String weaponSuffix = "";
         if (equippedWeapon != null && !equippedWeapon.isEmpty() && !equippedWeapon.equals("Empty")
                 && spell.getSlotCost() == 0) {
             weaponSuffix = " [" + equippedWeapon + "]";
         }
-        p.sendMessage(Message.raw("    - " + spell.getName() + cost + range + weaponSuffix).color("#FFFFFF"));
+
+        p.sendMessage(Message.raw("    - " + spell.getName() + cost + " | " + range + targets + weaponSuffix).color("#FFFFFF"));
         if (spell.getDamageDice() != null) {
-            p.sendMessage(Message.raw("      Dmg: " + spell.getDamageDice() + " " + spell.getDamageType().name().toLowerCase()
+            p.sendMessage(Message.raw("      Dmg: " + spell.getDamageDice() + " "
+                    + spell.getDamageType().name().toLowerCase()
                     + " | " + spell.getPattern().name().toLowerCase()).color("#FF6B6B"));
         } else {
             p.sendMessage(Message.raw("      Effect | " + spell.getPattern().name().toLowerCase()).color("#90EE90"));

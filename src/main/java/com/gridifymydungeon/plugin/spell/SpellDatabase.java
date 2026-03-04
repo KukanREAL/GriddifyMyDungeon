@@ -21,7 +21,6 @@ public class SpellDatabase {
         initializeBaseClassSpells();
         initializeSubclassSpells();
         initializeMonsterAttacks();
-        registerClassAttacks();
         buildIndices();
     }
 
@@ -36,7 +35,7 @@ public class SpellDatabase {
 
         registerBase(new SpellData(
                 "Magic_Missile",
-                1, 24, SpellPattern.SINGLE_TARGET, 0,
+                1, 10, SpellPattern.SINGLE_TARGET, 0,
                 "1d4", DamageType.FORCE,
                 ClassType.WIZARD, 1,
                 false, 0,
@@ -67,7 +66,7 @@ public class SpellDatabase {
                 "8d6", DamageType.LIGHTNING,
                 ClassType.WIZARD, 5,
                 false, 0,
-                "20-grid long line. DEX save for half. +1d6 per spell level above 3rd"
+                "10-grid long line. DEX save for half. +1d6 per spell level above 3rd"
         ));
 
         registerBase(new SpellData(
@@ -79,19 +78,9 @@ public class SpellDatabase {
                 "12-grid cone. CON save for half. +1d8 per spell level above 5th"
         ));
 
-
-        registerBase(new SpellData(
-                "Polymorph",
-                4, 12, SpellPattern.SINGLE_TARGET, 0,
-                null, DamageType.NONE,
-                ClassType.WIZARD, 7,
-                true, 10,
-                "Transform one target into: Bear (34 HP), Dire_Wolf (37 HP), Rex (136 HP), Feran_Windwalker (45 HP), or Spider (26 HP). Lasts 10 turns or until target drops to 0 HP", 1
-        ));
-
         registerBase(new SpellData(
                 "Arcane_Barrage",
-                4, 12, SpellPattern.SINGLE_TARGET, 0,
+                4, 15, SpellPattern.SINGLE_TARGET, 0,
                 "4d10", DamageType.FORCE,
                 ClassType.WIZARD, 7,
                 false, 0,
@@ -112,12 +101,12 @@ public class SpellDatabase {
         ));
 
         registerBase(new SpellData(
-                "Power_Strike",
+                "Shield_Bash",
                 0, 0, SpellPattern.SINGLE_TARGET, 0,
                 "2d6", DamageType.BLUDGEONING,
                 ClassType.FIGHTER, 3,
                 false, 0,
-                "Brutal blow. STR save or target takes +2d6 bonus damage and is pushed 1 grid back"
+                "STR save or target knocked prone and pushed 1 grid"
         ));
 
         registerBase(new SpellData(
@@ -130,21 +119,21 @@ public class SpellDatabase {
         ));
 
         registerBase(new SpellData(
-                "Devastating_Charge",
+                "Charging_Strike",
                 0, 0, SpellPattern.LINE, 6,
                 "3d10", DamageType.BLUDGEONING,
                 ClassType.FIGHTER, 5,
                 false, 0,
-                "Charge through a 6-grid line, dealing 3d10 to all in path. DEX save for half"
+                "+1d6 per 2 grids charged. Must move at least 4 grids straight before attack"
         ));
 
         registerBase(new SpellData(
-                "Battle_Cry",
+                "Intimidating_Shout",
                 0, 0, SpellPattern.CONE, 8,
                 null, DamageType.NONE,
                 ClassType.FIGHTER, 7,
-                true, 2,
-                "Thunderous war cry. WIS save or target loses their next action (stunned 2 turns). Does not affect other players"
+                true, 10,
+                "WIS save or frightened for 1 minute. Disadvantage, can't move closer"
         ));
 
         registerBase(new SpellData(
@@ -175,7 +164,7 @@ public class SpellDatabase {
                 null, DamageType.NONE,
                 ClassType.DRUID, 1,
                 true, 10,
-                "20ft square of grasping vines (2 grid radius = 4x4 grids). STR save or restrained. Difficult terrain"
+                "20ft square of grasping vines (2 grid radius = 5x5 grids). STR save or restrained. Difficult terrain"
         ));
 
         registerBase(new SpellData(
@@ -220,7 +209,7 @@ public class SpellDatabase {
                 "2d6", DamageType.PIERCING,
                 ClassType.DRUID, 5,
                 true, 100,
-                "Transform into dire wolf. Savage bite deals 2d6 piercing + target takes 1d6 bleeding damage next turn. High mobility"
+                "Transform into dire wolf. Knock prone on hit, pack tactics. High mobility"
         ));
 
         registerBase(new SpellData(
@@ -255,21 +244,21 @@ public class SpellDatabase {
         ));
 
         registerBase(new SpellData(
-                "Wind_Dash",
-                0, 12, SpellPattern.SELF, 0,
-                null, DamageType.NONE,
-                ClassType.MONK, 1,
-                false, 0,
-                "Costs 1 Ki. Teleport up to 6 grids instantly. Next attack this turn has +1d6 bonus damage"
-        ));
-
-        registerBase(new SpellData(
-                "Iron_Body",
+                "Step_of_the_Wind",
                 0, 0, SpellPattern.SELF, 0,
                 null, DamageType.NONE,
                 ClassType.MONK, 1,
-                false, 1,
-                "Costs 1 Ki. Harden your body — reduce the next damage you take by 1d10 + DEX + Monk level. Lasts until start of next turn"
+                false, 0,
+                "Bonus action. Costs 1 Ki. Double jump, disengage or dash. No opportunity attacks"
+        ));
+
+        registerBase(new SpellData(
+                "Deflect_Missiles",
+                0, 0, SpellPattern.SELF, 0,
+                null, DamageType.NONE,
+                ClassType.MONK, 1,
+                false, 0,
+                "Reaction. Reduce damage by 1d10+DEX+Monk level. Spend 1 Ki to throw back"
         ));
 
         registerBase(new SpellData(
@@ -327,16 +316,16 @@ public class SpellDatabase {
                 null, DamageType.NONE,
                 ClassType.BARD, 1,
                 false, 0,
-                "Grant one ally +1d6 to their next attack roll, save, or ability check (GM adds manually). Die increases with level"
+                "Bonus action. Grant 1d6 bonus to attack/save/check. Die increases with level"
         ));
 
         registerBase(new SpellData(
                 "Thunderwave",
-                1, 0, SpellPattern.WALL, 2,
+                1, 0, SpellPattern.CUBE, 1,
                 "2d8", DamageType.THUNDER,
                 ClassType.BARD, 1,
                 false, 0,
-                "15ft cube (3x3 rectangle in front of caster). Walk AROUND NPC to rotate. /CastTarget to lock. CON save half, push 2 grids. +1d8/level"
+                "15ft cube (1 grid radius = 3x3 grids). CON save for half, push 2 grids on fail. +1d8 per level"
         ));
 
         registerBase(new SpellData(
@@ -354,25 +343,25 @@ public class SpellDatabase {
                 null, DamageType.NONE,
                 ClassType.BARD, 5,
                 true, 10,
-                "30ft cube (3 grid radius = 7x7 grids). WIS save or incapacitated for 2 turns. Concentration — breaks if caster is hit"
+                "30ft cube (3 grid radius = 7x7 grids). WIS save or charmed/incapacitated. Ends if damaged or shaken"
         ));
 
         registerBase(new SpellData(
-                "Healing_Song",
-                0, 0, SpellPattern.AURA, 6,
-                "1d6", DamageType.NONE,
+                "Song_of_Rest",
+                0, 0, SpellPattern.AURA, 99,
+                null, DamageType.NONE,
                 ClassType.BARD, 1,
                 false, 0,
-                "Soothing melody heals all allies within 6 grids for 1d6 HP. Usable once per encounter"
+                "Short rest only. Allies regain extra 1d6 HP. Die increases with level"
         ));
 
         registerBase(new SpellData(
-                "Mass_Psychic_Blast",
-                6, 12, SpellPattern.SPHERE, 6,
-                "4d8", DamageType.PSYCHIC,
+                "Mass_Suggestion",
+                6, 12, SpellPattern.SINGLE_TARGET, 0,
+                null, DamageType.NONE,
                 ClassType.BARD, 9,
-                false, 0,
-                "Psychic shockwave in 6-grid sphere. WIS save for half. On fail: target also loses their next action"
+                true, 1440,
+                "Up to 12 targets. WIS save or follow reasonable suggestion for 24 hours"
         ));
 
         registerBase(new SpellData(
@@ -412,8 +401,7 @@ public class SpellDatabase {
                 "1d10", DamageType.FIRE,
                 ClassType.SORCERER, 1,
                 false, 0,
-                "Metamagic. Costs 1 sorcery point. Hit two targets simultaneously",
-                2  // maxTargets = 2: use /CastTarget twice then /CastFinal
+                "Metamagic. Costs 1 sorcery point. Hit two targets simultaneously"
         ));
 
         registerBase(new SpellData(
@@ -564,12 +552,12 @@ public class SpellDatabase {
         ));
 
         registerBase(new SpellData(
-                "Frost_Shell",
-                1, 0, SpellPattern.AURA, 1,
+                "Armor_of_Agathys",
+                1, 0, SpellPattern.SELF, 0,
                 "5", DamageType.COLD,
                 ClassType.WARLOCK, 1,
                 true, 10,
-                "Gain 5 temp HP per slot level. Each turn: adjacent enemies take 5 cold damage (no save). Lasts 10 turns"
+                "Gain 5 temp HP. Attackers take 5 cold damage. +5 HP per level"
         ));
 
         // =====================================================================
@@ -639,21 +627,21 @@ public class SpellDatabase {
         ));
 
         registerBase(new SpellData(
-                "Shadow_Dash",
-                0, 8, SpellPattern.SELF, 0,
+                "Cunning_Action",
+                0, 0, SpellPattern.SELF, 0,
                 null, DamageType.NONE,
                 ClassType.ROGUE, 1,
                 false, 0,
-                "Teleport up to 4 grids in any direction instantly. Next attack this turn deals +2d6 sneak damage"
+                "Bonus action: Dash, Disengage, or Hide"
         ));
 
         registerBase(new SpellData(
-                "Evasive_Roll",
+                "Uncanny_Dodge",
                 0, 0, SpellPattern.SELF, 0,
                 null, DamageType.NONE,
                 ClassType.ROGUE, 3,
-                false, 1,
-                "Declare before being attacked. Next attack against you this turn has disadvantage (GM tracks). Costs your reaction"
+                false, 0,
+                "Reaction. Halve damage from one attack you can see"
         ));
     }
 
@@ -890,9 +878,6 @@ public class SpellDatabase {
                 "See in darkness, invisible creatures, illusions, true forms. See into Ethereal Plane. Lasts 1 hour (60 turns)"
         ));
 
-        // Continue with remaining subclass spells...
-        // (I'll include the key ones from your original file)
-
         // =====================================================================
         // CLERIC - LIFE DOMAIN
         // =====================================================================
@@ -968,16 +953,13 @@ public class SpellDatabase {
      */
     private static void initializeMonsterAttacks() {
         // Helper: ma(name, range, pattern, area, dice, dmgType, monsterType, desc)
-        // All registered into SPELL_MAP so /cast <name> works.
+        // All registered into SPELL_MAP so /cast <n> works.
 
         // ── GOBLIN ────────────────────────────────────────────────────────────
-        // Scimitar slash (melee single)
         ma("Goblin_Slash",      1, SpellPattern.SINGLE_TARGET, 0, "1d6",  DamageType.SLASHING,  MonsterType.GOBLIN,
                 "Melee scimitar. 1 grid. DEX-based.");
-        // Shortbow (ranged single)
         ma("Goblin_Arrow",      8, SpellPattern.SINGLE_TARGET, 0, "1d6",  DamageType.PIERCING,  MonsterType.GOBLIN,
                 "Shortbow shot. 8 grids.");
-        // Disengage dash — no damage, used for flavour (0 dice)
         ma("Goblin_Nimble",     0, SpellPattern.SELF,          0, null,   DamageType.NONE,       MonsterType.GOBLIN,
                 "Nimble Escape: Bonus action disengage. No damage.");
 
@@ -1207,13 +1189,9 @@ public class SpellDatabase {
         ma("Spirit_Pulse",       0, SpellPattern.AURA,          2, "2d6",  DamageType.FORCE,      MonsterType.SPIRIT,
                 "Elemental pulse. 2-grid aura burst.");
 
-        // ── WRAITH ────────────────────────────────────────────────────────────
-        // (already registered above)
-
         // ── BAT ───────────────────────────────────────────────────────────────
         ma("Bat_Bite",           1, SpellPattern.SINGLE_TARGET, 0, "1d4",  DamageType.PIERCING,   MonsterType.BAT,
                 "Bat bite. Melee 1 grid.");
-        // Large bat/archaeopteryx claws
         ma("Bat_DiveClaws",      0, SpellPattern.CONE,          1, "1d6",  DamageType.SLASHING,   MonsterType.BAT,
                 "Diving claw strike. 1-grid cone.");
 
@@ -1225,15 +1203,15 @@ public class SpellDatabase {
 
         // ── WOLF ──────────────────────────────────────────────────────────────
         ma("Wolf_Bite",          1, SpellPattern.SINGLE_TARGET, 0, "2d4+2",DamageType.PIERCING,   MonsterType.WOLF,
-                "Wolf bite. 1 grid. Target STR save or stunned 1 turn.");
+                "Wolf bite. 1 grid. Target STR save or knocked prone.");
         ma("Wolf_Pack",          0, SpellPattern.CONE,          2, "1d6+2",DamageType.PIERCING,   MonsterType.WOLF,
                 "Pack lunge. 2-grid cone.");
 
         // ── BOAR ──────────────────────────────────────────────────────────────
         ma("Boar_Tusk",          1, SpellPattern.SINGLE_TARGET, 0, "2d6+3",DamageType.SLASHING,   MonsterType.BOAR,
-                "Tusk gore. 1 grid. Target STR save or stunned 1 turn.");
+                "Tusk gore. 1 grid. Target STR save or knocked prone.");
         ma("Boar_Charge",        3, SpellPattern.LINE,          3, "2d6+3",DamageType.BLUDGEONING,MonsterType.BOAR,
-                "Charge. LINE 3 grids. Target STR save or stunned 1 turn.");
+                "Charge. LINE 3 grids. Target STR save or knocked prone.");
 
         // ── CROCODILE ─────────────────────────────────────────────────────────
         ma("Croc_Bite",          1, SpellPattern.SINGLE_TARGET, 0, "1d10+5",DamageType.PIERCING,  MonsterType.CROCODILE,
@@ -1263,7 +1241,7 @@ public class SpellDatabase {
         ma("BigCat_Bite",        1, SpellPattern.SINGLE_TARGET, 0, "1d8+4",DamageType.PIERCING,   MonsterType.BIG_CAT,
                 "Bite. 1 grid.");
         ma("BigCat_Pounce",      3, SpellPattern.LINE,          3, "2d6+4",DamageType.SLASHING,   MonsterType.BIG_CAT,
-                "Pounce. LINE 3 grids. STR save or stunned 1 turn + follow-up bite.");
+                "Pounce. LINE 3 grids. STR save or prone + bite attack.");
         ma("BigCat_Claw",        0, SpellPattern.CONE,          2, "1d6+4",DamageType.SLASHING,   MonsterType.BIG_CAT,
                 "Claw swipe. 2-grid cone.");
 
@@ -1275,9 +1253,9 @@ public class SpellDatabase {
 
         // ── REX ───────────────────────────────────────────────────────────────
         ma("Rex_Bite",           1, SpellPattern.SINGLE_TARGET, 0, "4d12+7",DamageType.PIERCING,  MonsterType.REX,
-                "Massive bite. 1 grid, 4d12+7. Target CON save or stunned 1 turn.");
+                "Massive bite. 1 grid, 4d12+7.");
         ma("Rex_Stomp",          0, SpellPattern.AURA,          2, "2d10+7",DamageType.BLUDGEONING,MonsterType.REX,
-                "Ground stomp. 2-grid aura. DEX save or stunned 1 turn.");
+                "Ground stomp. 2-grid aura. DEX save or knocked prone.");
         ma("Rex_Roar",           0, SpellPattern.CONE,          5, null,   DamageType.NONE,       MonsterType.REX,
                 "Terrifying roar. 5-grid cone. WIS save or frightened.");
 
@@ -1301,7 +1279,7 @@ public class SpellDatabase {
         ma("Warthog_Tusk",       1, SpellPattern.SINGLE_TARGET, 0, "2d6+3",DamageType.SLASHING,   MonsterType.WARTHOG,
                 "Tusk gore. 1 grid.");
         ma("Warthog_Charge",     3, SpellPattern.LINE,          3, "2d6+3",DamageType.BLUDGEONING,MonsterType.WARTHOG,
-                "Charge. LINE 3 grids. Target STR save or stunned 1 turn.");
+                "Charge. LINE 3 grids.");
 
         // ── YETI ──────────────────────────────────────────────────────────────
         ma("Yeti_Slam",          1, SpellPattern.SINGLE_TARGET, 0, "2d6+5",DamageType.BLUDGEONING,MonsterType.YETI,
@@ -1379,15 +1357,15 @@ public class SpellDatabase {
         ma("Trillo_Bite",        1, SpellPattern.SINGLE_TARGET,  0, "2d8+5",DamageType.PIERCING,  MonsterType.TRILLODON,
                 "Crushing bite. 1 grid.");
         ma("Trillo_Charge",      4, SpellPattern.LINE,           4, "2d6+5",DamageType.BLUDGEONING,MonsterType.TRILLODON,
-                "Charge. LINE 4 grids. STR save or stunned 1 turn.");
+                "Charge. LINE 4 grids, STR save or prone.");
 
         // ── TOAD RHINO ────────────────────────────────────────────────────────
         ma("ToadRhino_Gore",     1, SpellPattern.SINGLE_TARGET,  0, "2d8+5",DamageType.PIERCING,  MonsterType.TOAD_RHINO,
                 "Horn gore. 1 grid.");
         ma("ToadRhino_Charge",   4, SpellPattern.LINE,           4, "2d8+5",DamageType.BLUDGEONING,MonsterType.TOAD_RHINO,
-                "Charge. LINE 4 grids. STR save or stunned 1 turn.");
+                "Charge. LINE 4 grids.");
         ma("ToadRhino_Stomp",    0, SpellPattern.AURA,           1, "2d6+5",DamageType.BLUDGEONING,MonsterType.TOAD_RHINO,
-                "Stomp. 1-grid aura. DEX save or stunned 1 turn.");
+                "Stomp. 1-grid aura. DEX save or knocked prone.");
 
         // ── SPARK LIVING ──────────────────────────────────────────────────────
         ma("Spark_ZapBolt",      6, SpellPattern.LINE,           4, "2d6",  DamageType.LIGHTNING,  MonsterType.SPARK_LIVING,
@@ -1433,7 +1411,7 @@ public class SpellDatabase {
         ma("DragonVoid_Tail",    0, SpellPattern.LINE,           5, "2d8+9", DamageType.BLUDGEONING,MonsterType.DRAGON_VOID,
                 "Tail slap. LINE 5 grids.");
 
-        // Register all monster attacks in SPELL_MAP so /cast <name> works
+        // Register all monster attacks in SPELL_MAP so /cast <n> works
         for (SpellData atk : MONSTER_ATTACKS) {
             SPELL_MAP.put(atk.getName().toLowerCase(), atk);
         }
@@ -1463,24 +1441,6 @@ public class SpellDatabase {
      */
     private static void registerSubclass(SpellData spell) {
         SPELL_MAP.put(spell.getName().toLowerCase(), spell);
-    }
-
-    /**
-     * Class basic attacks — no spell slot, counts as action.
-     */
-    private static void registerClassAttacks() {
-        registerBase(new SpellData("Sword_Swing",       0, 1,  SpellPattern.SINGLE_TARGET, 0, "1d8",  DamageType.SLASHING,    ClassType.FIGHTER,   1, false, 0, "Longsword attack. Melee 1 grid. STR-based"));
-        registerBase(new SpellData("Bow_Shot",          0, 24, SpellPattern.SINGLE_TARGET, 0, "1d8",  DamageType.PIERCING,    ClassType.RANGER,    1, false, 0, "Longbow attack. Ranged 24 grids. DEX-based (Arrow_Iron)"));
-        registerBase(new SpellData("Sneak_Stab",        0, 1,  SpellPattern.SINGLE_TARGET, 0, "1d6",  DamageType.PIERCING,    ClassType.ROGUE,     1, false, 0, "Dagger attack. Melee 1 grid. DEX-based (+1d6 sneak if flanking)"));
-        registerBase(new SpellData("Greataxe_Swing",    0, 1,  SpellPattern.SINGLE_TARGET, 0, "1d12", DamageType.SLASHING,    ClassType.BARBARIAN, 1, false, 0, "Greataxe attack. Melee 1 grid. STR-based"));
-        registerBase(new SpellData("Shortsword_Slash",  0, 1,  SpellPattern.SINGLE_TARGET, 0, "1d6",  DamageType.PIERCING,    ClassType.BARD,      1, false, 0, "Shortsword attack. Melee 1 grid. DEX-based"));
-        registerBase(new SpellData("Morningstar_Strike",0, 1,  SpellPattern.SINGLE_TARGET, 0, "1d8",  DamageType.PIERCING,    ClassType.CLERIC,    1, false, 0, "Morningstar attack. Melee 1 grid. STR-based"));
-        registerBase(new SpellData("Staff_Strike",      0, 1,  SpellPattern.SINGLE_TARGET, 0, "1d6",  DamageType.BLUDGEONING, ClassType.DRUID,     1, false, 0, "Quarterstaff attack. Melee 1 grid. STR-based"));
-        registerBase(new SpellData("Unarmed_Strike",    0, 1,  SpellPattern.SINGLE_TARGET, 0, "1d6",  DamageType.BLUDGEONING, ClassType.MONK,      1, false, 0, "Unarmed martial arts strike. Melee 1 grid. DEX or STR-based"));
-        registerBase(new SpellData("Paladin_Strike",    0, 1,  SpellPattern.SINGLE_TARGET, 0, "1d8",  DamageType.SLASHING,    ClassType.PALADIN,   1, false, 0, "Longsword attack. Melee 1 grid. STR-based (chain /cast Divine_Smite after hit)"));
-        registerBase(new SpellData("Dagger_Throw",      0, 6,  SpellPattern.SINGLE_TARGET, 0, "1d4",  DamageType.PIERCING,    ClassType.SORCERER,  1, false, 0, "Dagger throw. Ranged 6 grids. DEX-based"));
-        registerBase(new SpellData("Pact_Blade",        0, 1,  SpellPattern.SINGLE_TARGET, 0, "1d8",  DamageType.SLASHING,    ClassType.WARLOCK,   1, false, 0, "Pact of the Blade. Melee 1 grid. CHA-based"));
-        registerBase(new SpellData("Quarterstaff",      0, 1,  SpellPattern.SINGLE_TARGET, 0, "1d6",  DamageType.BLUDGEONING, ClassType.WIZARD,    1, false, 0, "Quarterstaff attack. Melee 1 grid. STR-based"));
     }
 
     /**
@@ -1530,18 +1490,23 @@ public class SpellDatabase {
      * @param classType Player's class
      * @param subclass Player's subclass (null if level < 3)
      * @param playerLevel Player's level
+     *
+     * FIX: Base-class section now filters with isBaseClassSpell() to exclude
+     *      subclass spells from other subclasses that share the same parent
+     *      classType index.
      */
     public static List<SpellData> getAvailableSpells(ClassType classType, SubclassType subclass, int playerLevel) {
         List<SpellData> available = new ArrayList<>();
 
-        // Add base class spells
+        // Add base class spells ONLY (exclude subclass spells — they are handled below)
         if (classType != null) {
             available.addAll(getSpellsForClass(classType).stream()
+                    .filter(SpellData::isBaseClassSpell)              // ← FIX: skip subclass spells
                     .filter(spell -> spell.getMinLevel() <= playerLevel)
                     .collect(Collectors.toList()));
         }
 
-        // Add subclass spells (if player has chosen a subclass)
+        // Add subclass spells (only the player's chosen subclass)
         if (subclass != null && playerLevel >= 3) {
             available.addAll(getSpellsForSubclass(subclass).stream()
                     .filter(spell -> spell.getMinLevel() <= playerLevel)

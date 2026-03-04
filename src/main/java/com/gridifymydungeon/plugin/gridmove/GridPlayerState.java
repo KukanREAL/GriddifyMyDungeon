@@ -1,8 +1,8 @@
 package com.gridifymydungeon.plugin.gridmove;
 
 import com.gridifymydungeon.plugin.dnd.CharacterStats;
-import com.gridifymydungeon.plugin.spell.SpellCastingState;
 import com.gridifymydungeon.plugin.spell.CustomCastState;
+import com.gridifymydungeon.plugin.spell.SpellCastingState;
 import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.math.vector.Vector3d;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
@@ -13,14 +13,12 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Tracks player grid movement state.
- *
- * FIX #1: Added rangeOverlay list for Grid_Range tiles (spell reach ring).
- * FIX #6: Added fogMarkerRef2/fogMarkerNetId2 for the outer 13x13 fog layer.
+ * Tracks player grid movement state
+ * FIXED v6: Added hotbarState, customCastState, hud fields
  */
 public class GridPlayerState {
 
-    // Reference to PlayerRef for easy access by commands
+    // ADDED: Reference to PlayerRef for easy access by commands
     public PlayerRef playerRef;
 
     // Grid tracking
@@ -50,39 +48,27 @@ public class GridPlayerState {
     // Character stats
     public CharacterStats stats;
 
-    // Grid overlay — movement range tiles (Grid_Basic / Grid_Player)
+    // Hotbar state (tracks active mode, spell selection, etc.)
+    public PlayerHotbarState hotbarState = new PlayerHotbarState();
+
+    // HUD panel (CustomUI top-left panel, created lazily on first use)
+    public GriddifyHud hud;
+
+    // Direction holograms (WASD indicators)
+    public Ref<EntityStore> northHologram;
+    public Ref<EntityStore> southHologram;
+    public Ref<EntityStore> eastHologram;
+    public Ref<EntityStore> westHologram;
+    public Ref<EntityStore> northEastHologram;
+    public Ref<EntityStore> northWestHologram;
+    public Ref<EntityStore> southEastHologram;
+    public Ref<EntityStore> southWestHologram;
+
+    // Grid overlay — variable number of Grid_Quarter entities (4 per reachable cell)
     public List<Ref<EntityStore>> gridOverlay = new ArrayList<>();
     public boolean gridOverlayEnabled = false;
-    /** True when the overlay is the GM static /grid map, false when it's BFS range. */
+    /** True when the overlay is the GM 100x100 flat map (/grid), false when it's BFS range (/gridon). */
     public boolean gmMapOverlayActive = false;
-
-    // Active tile map: key="x,z", value=entity ref currently at that grid position
-    public java.util.Map<String, Ref<EntityStore>> gridTileMap = new java.util.HashMap<>();
-
-    // Ledge tile map: cliff cells adjacent to BFS frontier.
-    // Key="x,z"  Value=Object[]{Ref<EntityStore>, Float groundY}
-    public java.util.Map<String, Object[]> ledgeTileMap = new java.util.HashMap<>();
-
-    // Legacy netId cache (kept for compatibility — now read directly from component)
-    public java.util.Map<String, Integer> gridTileNetIds = new java.util.HashMap<>();
-
-    // Pool of parked tiles sitting at y=-30, visible to owner, hidden from others.
-    // Populated when tiles leave BFS range. Consumed (teleported up) when new cells enter.
-    public java.util.List<Ref<EntityStore>> gridTilePool = new java.util.ArrayList<>();
-
-    // Per-cell ground-Y cache: avoids re-scanning blocks for cells seen before.
-    // Key: packKey(gridX,gridZ) long, Value: groundY float
-    public java.util.Map<Long, Float> groundYCache = new java.util.HashMap<>();
-
-    // Previous player BFS origin — detect which cells are brand-new this step
-    public int prevBfsX = Integer.MIN_VALUE;
-    public int prevBfsZ = Integer.MIN_VALUE;
-
-    public boolean gridTilesHiddenFromOthers = false;
-
-    // ── SPELL RANGE overlay — Grid_Range tiles shown during /cast ───────────
-    // FIX #1: Stored per-player so clearRangeOverlay() can remove them at /castfinal or /castcancel
-    public List<Ref<EntityStore>> rangeOverlay = new ArrayList<>();
 
     // One-time "no moves" message — reset each turn
     public boolean noMovesMessageShown = false;
@@ -90,34 +76,42 @@ public class GridPlayerState {
     // Spell casting state
     private SpellCastingState spellCastingState = null;
 
+    // Custom cast state (GM custom monster attack via /cast custom)
+    private CustomCastState customCastState = null;
+
     // Action economy: only 1 action (spell/attack) per turn
     public boolean hasUsedAction = false;
 
-    // ── Fog-of-war markers ────────────────────────────────────────────────────
-    // FIX #6: Two fog layers — inner 11×11 and outer 13×13 ring
-    public Ref<EntityStore> fogMarkerRef    = null;   // inner  11×11 (scale 5.5f)
-    public int              fogMarkerNetId  = -1;
-    public Ref<EntityStore> fogMarkerRef2   = null;   // outer  13×13 (scale 6.5f)
+    // ── Fog-of-war markers (private entities above NPC, visible only to owner) ──
+    public Ref<EntityStore> fogMarkerRef   = null;
+    public int              fogMarkerNetId = -1;
+    public Ref<EntityStore> fogMarkerRef2   = null;
     public int              fogMarkerNetId2 = -1;
 
-    // ── Equipment snapshot (taken at /gridmove, re-sent to late viewers) ─────
+    // ── Grid overlay tile pool / map (used by GridOverlayManager) ──
+    public final java.util.Map<String, Ref<EntityStore>> gridTileMap = new java.util.LinkedHashMap<>();
+    public final java.util.Map<String, Object[]>         ledgeTileMap = new java.util.LinkedHashMap<>();
+    public final java.util.List<Ref<EntityStore>>        gridTilePool = new java.util.ArrayList<>();
+    public final java.util.Map<String, Integer>          gridTileNetIds = new java.util.HashMap<>();
+    public final java.util.Map<Long, Float>              groundYCache = new java.util.HashMap<>();
+    public int     prevBfsX = Integer.MIN_VALUE;
+    public int     prevBfsZ = Integer.MIN_VALUE;
+    public boolean gridTilesHiddenFromOthers = false;
+
+    // ── Equipment snapshot (taken at /gridmove, re-sent to late viewers) ──
     public String[] storedArmorIds   = null;
     public String   storedRightHand  = null;
     public String   storedLeftHand   = null;
-
-    // ── HOTBAR MODE state ─────────────────────────────────────────────────────
-    public PlayerHotbarState hotbarState = new PlayerHotbarState();
 
     public SpellCastingState getSpellCastingState() { return spellCastingState; }
     public void setSpellCastingState(SpellCastingState state) { this.spellCastingState = state; }
     public void clearSpellCastingState() { this.spellCastingState = null; }
 
-    // ── CUSTOM CAST state — GM custom monster attack (/cast custom) ───────
-    private CustomCastState customCastState = null;
-    public CustomCastState getCustomCastState()              { return customCastState; }
-    public void setCustomCastState(CustomCastState s)        { this.customCastState = s; }
-    public void clearCustomCastState()                       { this.customCastState = null; }
-    public boolean hasActiveCustomCast()                     { return customCastState != null; }
+    // ── Custom cast state (GM /cast custom) ───────────────────────────────────
+    public CustomCastState getCustomCastState() { return customCastState; }
+    public void setCustomCastState(CustomCastState state) { this.customCastState = state; }
+    public void clearCustomCastState() { this.customCastState = null; }
+    public boolean hasActiveCustomCast() { return customCastState != null; }
 
     public GridPlayerState() {
         this.gridSize = 2.0;
@@ -141,13 +135,17 @@ public class GridPlayerState {
 
     public void consumeMoves(double cost) {
         remainingMoves -= cost;
-        if (remainingMoves < 0) remainingMoves = 0;
+        if (remainingMoves < 0) {
+            remainingMoves = 0;
+        }
     }
 
     public void resetMoves() {
-        if (hasMaxMovesSet()) remainingMoves = maxMoves;
+        if (hasMaxMovesSet()) {
+            remainingMoves = maxMoves;
+        }
         noMovesMessageShown = false;
-        hasUsedAction = false;
+        hasUsedAction = false; // Reset action for new turn
     }
 
     public void freeze(String reason) {
