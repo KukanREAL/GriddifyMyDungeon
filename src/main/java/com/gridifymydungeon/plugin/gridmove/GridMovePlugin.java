@@ -160,8 +160,7 @@ public class GridMovePlugin extends JavaPlugin {
         getCommandRegistry().registerCommand(new GridOffCommand(gridMoveManager));
         getCommandRegistry().registerCommand(new GridToggleCommand(gridMoveManager, collisionDetector, encounterManager, roleManager));
 
-        // GM commands
-        getCommandRegistry().registerCommand(new CreatureCommand(encounterManager, roleManager, collisionDetector));
+        // GM commands (excluding CreatureCommand — registered after hotbarInputHandler is built)
         getCommandRegistry().registerCommand(new ControlCommand(roleManager, encounterManager, gridMoveManager));
         getCommandRegistry().registerCommand(new SlainCommand(encounterManager, roleManager));
 
@@ -221,7 +220,6 @@ public class GridMovePlugin extends JavaPlugin {
 
         // Help command
         getCommandRegistry().registerCommand(new GridWeatherCommand(roleManager));
-        // TestFogCommand removed — replaced by FogOfWarCommand (/FogOfWar)
         getCommandRegistry().registerCommand(fogOfWarCommand);
         getCommandRegistry().registerCommand(new GridHelpCommand(roleManager));
 
@@ -232,6 +230,10 @@ public class GridMovePlugin extends JavaPlugin {
         disconnectListener.setHotbarInputHandler(hotbarInputHandler);
         gmCmd.setHotbarInputHandler(hotbarInputHandler);
         gridPlayerCmd.setHotbarInputHandler(hotbarInputHandler);
+
+        // CreatureCommand registered here so hotbarInputHandler is guaranteed non-null
+        getCommandRegistry().registerCommand(new CreatureCommand(
+                encounterManager, roleManager, collisionDetector, gridMoveManager, hotbarInputHandler));
 
         getLogger().at(Level.INFO).log("Registered all commands successfully!");
     }

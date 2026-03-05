@@ -5,6 +5,11 @@ import com.gridifymydungeon.plugin.dnd.MonsterDatabase;
 import com.gridifymydungeon.plugin.dnd.MonsterState;
 import com.gridifymydungeon.plugin.dnd.RoleManager;
 import com.gridifymydungeon.plugin.gridmove.CollisionDetector;
+import com.gridifymydungeon.plugin.gridmove.GridMoveManager;
+import com.gridifymydungeon.plugin.gridmove.GridPlayerState;
+import com.gridifymydungeon.plugin.gridmove.HotbarInputHandler;
+import com.gridifymydungeon.plugin.gridmove.PlayerHotbarState;
+import com.gridifymydungeon.plugin.gridmove.StatEditorPage;
 import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.component.Store;
 import com.hypixel.hytale.math.vector.Vector3d;
@@ -26,142 +31,82 @@ import javax.annotation.Nonnull;
 
 /**
  * /creature <name> <number> - Spawn a monster (GM only)
- * UPDATED: Uses popup notifications instead of chat messages
+ * After successful spawn, automatically opens the stat editor for that monster.
  */
 public class CreatureCommand extends AbstractPlayerCommand {
-    private final EncounterManager encounterManager;
-    private final RoleManager roleManager;
-    private final CollisionDetector collisionDetector;
-    private final RequiredArg<String> nameArg;
+
+    private final EncounterManager   encounterManager;
+    private final RoleManager        roleManager;
+    private final CollisionDetector  collisionDetector;
+    private final GridMoveManager    gridMoveManager;
+    private final HotbarInputHandler hotbarInputHandler;
+    private final RequiredArg<String>  nameArg;
     private final RequiredArg<Integer> numberArg;
 
-    public CreatureCommand(EncounterManager encounterManager, RoleManager roleManager, CollisionDetector collisionDetector) {
+    public CreatureCommand(@Nonnull EncounterManager encounterManager,
+                           @Nonnull RoleManager roleManager,
+                           @Nonnull CollisionDetector collisionDetector,
+                           @Nonnull GridMoveManager gridMoveManager,
+                           @Nonnull HotbarInputHandler hotbarInputHandler) {
         super("creature", "Spawn a creature (GM only)");
-        this.encounterManager = encounterManager;
-        this.roleManager = roleManager;
-        this.collisionDetector = collisionDetector;
-        this.nameArg = this.withRequiredArg("name", "Creature name", ArgTypes.STRING);
+        this.encounterManager   = encounterManager;
+        this.roleManager        = roleManager;
+        this.collisionDetector  = collisionDetector;
+        this.gridMoveManager    = gridMoveManager;
+        this.hotbarInputHandler = hotbarInputHandler;
+        this.nameArg   = this.withRequiredArg("name",   "Creature name",   ArgTypes.STRING);
         this.numberArg = this.withRequiredArg("number", "Creature number", ArgTypes.INTEGER);
     }
 
     @Override
     protected void execute(@Nonnull CommandContext context, @Nonnull Store<EntityStore> store,
-                           @Nonnull Ref<EntityStore> ref, @Nonnull PlayerRef playerRef, @Nonnull World world) {
+                           @Nonnull Ref<EntityStore> ref, @Nonnull PlayerRef playerRef,
+                           @Nonnull World world) {
 
-        // Check if GM
         if (!roleManager.isGM(playerRef)) {
-            // ERROR: Not GM
-            Message primary = Message.raw("Only the GM can use this command!").color("#FF0000");
-            ItemWithAllMetadata icon = new ItemStack("Ingredient_Crystal_Red", 1).toPacket();
-
-            NotificationUtil.sendNotification(
-                    playerRef.getPacketHandler(),
-                    primary,
-                    null,
-                    icon,
-                    NotificationStyle.Default
-            );
+            notify(playerRef, "#FF0000", "Only the GM can use this command!", null, "Ingredient_Crystal_Red");
             return;
         }
 
-        String monsterName = nameArg.get(context);
-        int monsterNumber = numberArg.get(context);
+        String monsterName   = nameArg.get(context);
+        int    monsterNumber = numberArg.get(context);
 
-        // Validate monster number
         if (monsterNumber <= 0) {
-            // ERROR: Invalid number
-            Message primary = Message.raw("Monster number must be greater than 0!").color("#FF0000");
-            ItemWithAllMetadata icon = new ItemStack("Ingredient_Crystal_Red", 1).toPacket();
-
-            NotificationUtil.sendNotification(
-                    playerRef.getPacketHandler(),
-                    primary,
-                    null,
-                    icon,
-                    NotificationStyle.Default
-            );
+            notify(playerRef, "#FF0000", "Monster number must be greater than 0!", null, "Ingredient_Crystal_Red");
             return;
         }
 
-        // Check if number already exists
         if (encounterManager.getMonster(monsterNumber) != null) {
-            // WARNING: Monster already exists
-            Message primary = Message.raw("Monster #" + monsterNumber + " already exists!").color("#FFA500");
-            ItemWithAllMetadata icon = new ItemStack("Ingredient_Crystal_Yellow", 1).toPacket();
-
-            NotificationUtil.sendNotification(
-                    playerRef.getPacketHandler(),
-                    primary,
-                    null,
-                    icon,
-                    NotificationStyle.Default
-            );
+            notify(playerRef, "#FFA500", "Monster #" + monsterNumber + " already exists!", null, "Ingredient_Crystal_Yellow");
             return;
         }
 
-        // Get GM position
         Vector3d gmPos = getPlayerPosition(playerRef, world);
         if (gmPos == null) {
-            // ERROR: Failed to get position
-            Message primary = Message.raw("Failed to get your position!").color("#FF0000");
-            ItemWithAllMetadata icon = new ItemStack("Ingredient_Crystal_Red", 1).toPacket();
-
-            NotificationUtil.sendNotification(
-                    playerRef.getPacketHandler(),
-                    primary,
-                    null,
-                    icon,
-                    NotificationStyle.Default
-            );
+            notify(playerRef, "#FF0000", "Failed to get your position!", null, "Ingredient_Crystal_Red");
             return;
         }
 
-        // Calculate grid position
         int gridX = (int) Math.floor(gmPos.getX() / 2.0);
         int gridZ = (int) Math.floor(gmPos.getZ() / 2.0);
 
-        // Check collision
         if (collisionDetector.isPositionOccupied(gridX, gridZ, monsterNumber)) {
             String occupant = collisionDetector.getEntityNameAtPosition(gridX, gridZ);
+            notify(playerRef, "#FFA500", "Position occupied by: " + occupant, null, "Ingredient_Crystal_Yellow");
 
-            // WARNING: Position occupied
-            Message warningPrimary = Message.raw("Position occupied by: " + occupant).color("#FFA500");
-            ItemWithAllMetadata warningIcon = new ItemStack("Ingredient_Crystal_Yellow", 1).toPacket();
-
-            NotificationUtil.sendNotification(
-                    playerRef.getPacketHandler(),
-                    warningPrimary,
-                    null,
-                    warningIcon,
-                    NotificationStyle.Default
-            );
-
-            // Find nearest free position
             int[] freePos = collisionDetector.findNearestFreePosition(gridX, gridZ, 5);
             gridX = freePos[0];
             gridZ = freePos[1];
 
-            // INFO: Using alternate position
-            Message infoPrimary = Message.raw("Spawning at nearest free position").color("#00BFFF");
-            Message infoSecondary = Message.raw("Grid: (" + gridX + ", " + gridZ + ")").color("#FFFFFF");
-            ItemWithAllMetadata infoIcon = new ItemStack("Ingredient_Crystal_Cyan", 1).toPacket();
-
-            NotificationUtil.sendNotification(
-                    playerRef.getPacketHandler(),
-                    infoPrimary,
-                    infoSecondary,
-                    infoIcon,
-                    NotificationStyle.Default
-            );
+            notify(playerRef, "#00BFFF", "Spawning at nearest free position",
+                    "Grid: (" + gridX + ", " + gridZ + ")", "Ingredient_Crystal_Cyan");
         }
 
-        // Create monster state
         MonsterState monster = encounterManager.addMonster(monsterName, monsterNumber);
-        monster.currentGridX = gridX;
-        monster.currentGridZ = gridZ;
+        monster.currentGridX   = gridX;
+        monster.currentGridZ   = gridZ;
         monster.lastGMPosition = gmPos;
 
-        // ── Apply D&D stats from database if available ──────────────────────
         MonsterDatabase.MonsterStats dbStats = MonsterDatabase.getStats(monsterName);
         if (dbStats != null) {
             dbStats.applyTo(monster.stats);
@@ -169,7 +114,7 @@ public class CreatureCommand extends AbstractPlayerCommand {
             monster.remainingMoves = dbStats.moves;
             monster.isFlying       = dbStats.flying;
             monster.stats.isFlying = dbStats.flying;
-            monster.monsterType    = dbStats.monsterType;   // ← gates attack access
+            monster.monsterType    = dbStats.monsterType;
             playerRef.sendMessage(Message.raw("[Griddify] Stats loaded: HP " + dbStats.maxHP
                     + " (" + dbStats.hitDice + ")  AC " + dbStats.ac
                     + "  CR " + MonsterDatabase.formatCR(dbStats.cr10x)
@@ -179,59 +124,98 @@ public class CreatureCommand extends AbstractPlayerCommand {
                     + "' — using defaults. Use /HP and /AC to set manually.").color("#FFA500"));
         }
 
-        // Spawn monster entity in world
-        final int finalGridX = gridX;
-        final int finalGridZ = gridZ;
+        final int finalGridX        = gridX;
+        final int finalGridZ        = gridZ;
+        final MonsterState finalMonster = monster;
 
         world.execute(() -> {
-            boolean success = MonsterEntityController.spawnMonster(world, monster, finalGridX, finalGridZ, gmPos.getY());
+            boolean success = MonsterEntityController.spawnMonster(
+                    world, finalMonster, finalGridX, finalGridZ, gmPos.getY());
 
             if (success) {
-                // SUCCESS: Monster spawned
-                Message primary = Message.raw("Spawned " + monster.getDisplayName()).color("#90EE90");
-                Message secondary = Message.raw("Grid: (" + finalGridX + ", " + finalGridZ + ")").color("#FFFFFF");
-                ItemWithAllMetadata icon = new ItemStack("Ingredient_Crystal_Green", 1).toPacket();
+                notify(playerRef, "#90EE90",
+                        "Spawned " + finalMonster.getDisplayName(),
+                        "Grid: (" + finalGridX + ", " + finalGridZ + ")",
+                        "Ingredient_Crystal_Green");
 
-                NotificationUtil.sendNotification(
-                        playerRef.getPacketHandler(),
-                        primary,
-                        secondary,
-                        icon,
-                        NotificationStyle.Default
-                );
+                System.out.println("[Griddify] [CREATURE] GM spawned " + finalMonster.getDisplayName()
+                        + " at grid (" + finalGridX + ", " + finalGridZ + ")");
 
-                System.out.println("[Griddify] [CREATURE] GM spawned " + monster.getDisplayName() +
-                        " at grid (" + finalGridX + ", " + finalGridZ + ") with entity");
+                // ── Auto-open stat editor for the new monster ─────────────────
+                openStatEditorForMonster(playerRef, finalMonster);
+
             } else {
-                // ERROR: Spawn failed
-                encounterManager.removeMonster(monsterNumber);
-
-                Message primary = Message.raw("Failed to spawn " + monsterName + " #" + monsterNumber).color("#FF0000");
-                Message secondary = Message.raw("No ground found within 15 blocks below you!").color("#FF6B6B");
-                ItemWithAllMetadata icon = new ItemStack("Ingredient_Crystal_Red", 1).toPacket();
-
-                NotificationUtil.sendNotification(
-                        playerRef.getPacketHandler(),
-                        primary,
-                        secondary,
-                        icon,
-                        NotificationStyle.Default
-                );
-
-                System.err.println("[Griddify] [ERROR] Failed to spawn " + monster.getDisplayName() + " - no ground found");
+                encounterManager.removeMonster(finalMonster.monsterNumber);
+                notify(playerRef, "#FF0000",
+                        "Failed to spawn " + monsterName + " #" + monsterNumber,
+                        "No ground found within 15 blocks below you!",
+                        "Ingredient_Crystal_Red");
+                System.err.println("[Griddify] [ERROR] Failed to spawn " + finalMonster.getDisplayName());
             }
         });
     }
 
-    /**
-     * Get player position
-     */
+    // ── Opens stat editor for a freshly spawned monster ───────────────────────
+
+    private void openStatEditorForMonster(PlayerRef playerRef, MonsterState monster) {
+        GridPlayerState state = gridMoveManager.getState(playerRef);
+        if (state == null) return;
+
+        PlayerHotbarState hs = state.hotbarState;
+        String subjectName = monster.getDisplayName();
+
+        if (state.statEditorPage != null) {
+            state.statEditorPage.dismiss();
+            state.statEditorPage = null;
+        }
+
+        encounterManager.setControlled(monster.monsterNumber);
+
+        state.statEditorPage = new StatEditorPage(playerRef, monster.stats, subjectName,
+                // onSave
+                () -> {
+                    MonsterState ctrl = encounterManager.getControlledMonster();
+                    if (ctrl != null) {
+                        state.statEditorPage.applyTo(ctrl.stats);
+                        playerRef.sendMessage(Message.raw("Saved: " + ctrl.getDisplayName()).color("#00FF7F"));
+                    }
+                    state.statEditorPage.dismiss();
+                    state.statEditorPage = null;
+                    hs.setMode(PlayerHotbarState.Mode.NONE);
+                    hotbarInputHandler.refreshHudPublic(playerRef, state);
+                },
+                // onCancel
+                () -> {
+                    state.statEditorPage.dismiss();
+                    state.statEditorPage = null;
+                    hs.setMode(PlayerHotbarState.Mode.NONE);
+                    hotbarInputHandler.refreshHudPublic(playerRef, state);
+                    playerRef.sendMessage(Message.raw("Stat editor closed.").color("#AAAAAA"));
+                }
+        );
+
+        state.statEditorPage.open();
+        hs.setMode(PlayerHotbarState.Mode.STAT_EDIT);
+        hotbarInputHandler.refreshHudPublic(playerRef, state);
+        playerRef.sendMessage(Message.raw("Edit stats for " + subjectName
+                + " — Save or Cancel when done.").color("#FFD700"));
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private void notify(PlayerRef playerRef, String color, String primary,
+                        String secondary, String itemId) {
+        Message primaryMsg   = Message.raw(primary).color(color);
+        Message secondaryMsg = secondary != null ? Message.raw(secondary).color("#FFFFFF") : null;
+        ItemWithAllMetadata icon = new ItemStack(itemId, 1).toPacket();
+        NotificationUtil.sendNotification(
+                playerRef.getPacketHandler(), primaryMsg, secondaryMsg, icon, NotificationStyle.Default);
+    }
+
     private Vector3d getPlayerPosition(PlayerRef playerRef, World world) {
         try {
             TransformComponent transform = world.getEntityStore().getStore().getComponent(
-                    playerRef.getReference(),
-                    TransformComponent.getComponentType()
-            );
+                    playerRef.getReference(), TransformComponent.getComponentType());
             return transform != null ? transform.getPosition() : null;
         } catch (Exception e) {
             System.err.println("[Griddify] [ERROR] Failed to get player position: " + e.getMessage());

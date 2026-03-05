@@ -42,6 +42,7 @@ public class GriddifyHud extends CustomUIHud {
             case SPELL_SELECT:     showSpellSelect(state); break;
             case CONFIRM_TARGET:   showConfirmTarget(state); break;
             case CAST_FINAL:       showCastFinalArmed(state); break;
+            case STAT_EDIT:        showStatEdit(state, encounterManager, roleManager); break;
             case INFO:             showInfo(state, encounterManager, roleManager); break;
             case END_TURN_CONFIRM: showEndTurnConfirm(); break;
         }
@@ -51,10 +52,6 @@ public class GriddifyHud extends CustomUIHud {
         sendPanel("", "", new ArrayList<>());
     }
 
-    /**
-     * Update right panel (#HotkeyPanel) with role-specific labels.
-     * Called once from HotbarInputHandler.initHudForPlayer.
-     */
     public void updateRolePanel(boolean isGM) {
         UICommandBuilder cmd = new UICommandBuilder();
         if (isGM) {
@@ -65,10 +62,10 @@ public class GriddifyHud extends CustomUIHud {
             cmd.set("#HK4.TextSpans",         Message.raw("[4]  Confirm + Target"));
             cmd.set("#HK5.TextSpans",         Message.raw("[5]  Fire / Cast"));
             cmd.set("#HK6.TextSpans",         Message.raw("[6]  —"));
-            cmd.set("#HK7.TextSpans",         Message.raw("[7]  —"));
+            cmd.set("#HK7.TextSpans",         Message.raw("[7]  Edit Stats"));
             cmd.set("#HK8.TextSpans",         Message.raw("[8]  Monster info / Attacks"));
             cmd.set("#HK9.TextSpans",         Message.raw("[9]  End turn"));
-            cmd.set("#HKCrouch.TextSpans",    Message.raw("Crouch = Confirm / Scroll / Swap"));
+            cmd.set("#HKCrouch.TextSpans",    Message.raw("Crouch = Confirm / Scroll / Save"));
         } else {
             cmd.set("#HotkeyTitle.TextSpans", Message.raw("PLAYER CONTROLS"));
             cmd.set("#HK1.TextSpans",         Message.raw("[1]  Cancel / Freeze NPC"));
@@ -77,10 +74,10 @@ public class GriddifyHud extends CustomUIHud {
             cmd.set("#HK4.TextSpans",         Message.raw("[4]  Confirm + Target"));
             cmd.set("#HK5.TextSpans",         Message.raw("[5]  Cast / Fire"));
             cmd.set("#HK6.TextSpans",         Message.raw("[6]  —"));
-            cmd.set("#HK7.TextSpans",         Message.raw("[7]  —"));
+            cmd.set("#HK7.TextSpans",         Message.raw("[7]  Edit Stats"));
             cmd.set("#HK8.TextSpans",         Message.raw("[8]  Profile / Spells"));
             cmd.set("#HK9.TextSpans",         Message.raw("[9]  End turn"));
-            cmd.set("#HKCrouch.TextSpans",    Message.raw("Crouch = Confirm / Scroll / Swap"));
+            cmd.set("#HKCrouch.TextSpans",    Message.raw("Crouch = Confirm / Scroll / Save"));
         }
         update(false, cmd);
     }
@@ -202,14 +199,8 @@ public class GriddifyHud extends CustomUIHud {
         sendPanel("SELECT SPELL", "Crouch:scroll  [4]:confirm  [1]:cancel", l);
     }
 
-    /**
-     * CONFIRM_TARGET mode:
-     *   Phase 1 (spellConfirmed=false) — confirm spell, crouch fires /cast
-     *   Phase 2 (spellConfirmed=true)  — targeting active, crouch fires /casttarget
-     */
     private void showConfirmTarget(GridPlayerState state) {
         if (!state.hotbarState.spellConfirmed) {
-            // Phase 1 — confirm
             SpellData spell = state.hotbarState.getSelectedSpell();
             List<String[]> l = new ArrayList<>();
             if (spell != null) {
@@ -226,7 +217,6 @@ public class GriddifyHud extends CustomUIHud {
             }
             sendPanel("CONFIRM SPELL", "[1]:cancel", l);
         } else {
-            // Phase 2 — targeting
             SpellCastingState cast = state.getSpellCastingState();
             if (cast == null) {
                 List<String[]> l = new ArrayList<>();
@@ -263,9 +253,25 @@ public class GriddifyHud extends CustomUIHud {
         sendPanel("ARMED: " + name, "", l);
     }
 
-    /**
-     * INFO mode — crouch swaps between profile and spell/attack list.
-     */
+    private void showStatEdit(GridPlayerState state, EncounterManager em, RoleManager rm) {
+        List<String[]> l = new ArrayList<>();
+        boolean isGM = rm != null && rm.isGM(playerRef);
+        MonsterState monster = (isGM && em != null) ? em.getControlledMonster() : null;
+
+        String subject = monster != null
+                ? monster.getDisplayName()
+                : (state.stats != null && state.stats.getClassType() != null
+                ? state.stats.getClassType().getDisplayName() : "Character");
+
+        add(l, "#FFD700", "Editing: " + subject);
+        add(l, "#AAAAAA", "");
+        add(l, "#00FF7F", "Change values in the editor.");
+        add(l, "#00FF7F", "Crouch to save changes.");
+        add(l, "#AAAAAA", "[7] to cancel without saving.");
+        add(l, "#AAAAAA", "[1] to cancel without saving.");
+        sendPanel("STAT EDITOR", "Crouch to save  [7] to cancel", l);
+    }
+
     private void showInfo(GridPlayerState state, EncounterManager em, RoleManager rm) {
         if (state.hotbarState.infoShowingProfile) {
             showProfile(state, em, rm);
@@ -274,19 +280,12 @@ public class GriddifyHud extends CustomUIHud {
         }
     }
 
-    /**
-     * Profile panel.
-     * GM with controlled monster → shows monster stats.
-     * Player (or GM with no monster) → shows player/character stats.
-     */
     private void showProfile(GridPlayerState state, EncounterManager em, RoleManager rm) {
         List<String[]> l = new ArrayList<>();
-
         boolean isGM = rm != null && rm.isGM(playerRef);
         MonsterState monster = (isGM && em != null) ? em.getControlledMonster() : null;
 
         if (monster != null) {
-            // ── Monster profile ───────────────────────────────────────────────
             add(l, "#FF69B4", monster.getDisplayName() + "  #" + monster.monsterNumber);
             add(l, "#FFFFFF", "HP: " + monster.stats.currentHP + "/" + monster.stats.maxHP
                     + "  AC: " + monster.stats.armor);
@@ -307,9 +306,7 @@ public class GriddifyHud extends CustomUIHud {
                     + "  WIS " + monster.stats.wisdom
                     + "  CHA " + monster.stats.charisma);
             sendPanel("MONSTER INFO", "Crouch:attacks  [1]:close", l);
-
         } else {
-            // ── Player profile ────────────────────────────────────────────────
             if (state.stats == null) {
                 add(l, "#AAAAAA", "(No stats - use /GridClass)");
             } else {

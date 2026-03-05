@@ -51,6 +51,9 @@ public class GridPlayerState {
     // Hotbar state (tracks active mode, spell selection, etc.)
     public PlayerHotbarState hotbarState = new PlayerHotbarState();
 
+    // Hud Stats editor
+    public StatEditorPage statEditorPage = null;
+
     // HUD panel (CustomUI top-left panel, created lazily on first use)
     public GriddifyHud hud;
 

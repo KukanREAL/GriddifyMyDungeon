@@ -1,6 +1,7 @@
 package com.gridifymydungeon.plugin.gridmove;
 
 import com.gridifymydungeon.plugin.debug.DebugRoleWrapper;
+import com.gridifymydungeon.plugin.dnd.CharacterStats;
 import com.gridifymydungeon.plugin.dnd.EncounterManager;
 import com.gridifymydungeon.plugin.dnd.MonsterState;
 import com.gridifymydungeon.plugin.dnd.PlayerEntityController;
@@ -40,7 +41,7 @@ import java.util.UUID;
  *   Key 4 (slot 3) — Confirm + Target merged (first crouch = /cast, next = /casttarget)
  *   Key 5 (slot 4) — Cast final (crouch fires /castfinal)
  *   Key 6 (slot 5) — Empty
- *   Key 7 (slot 6) — Empty
+ *   Key 7 (slot 6) — Stat editor (Save/Cancel buttons, crouch also saves)
  *   Key 8 (slot 7) — Profile + Spell list merged (crouch swaps)
  *   Key 9 (slot 8) — End turn confirm (crouch fires /endturn)
  */
@@ -51,7 +52,8 @@ public class HotbarInputHandler implements PlayerPacketFilter {
     private static final int SLOT_SPELL_SELECT   = 2;
     private static final int SLOT_CONFIRM_TARGET = 3;
     private static final int SLOT_CAST_FINAL     = 4;
-    // slots 5, 6 = empty
+    // slot 5 = empty
+    private static final int SLOT_STAT_EDIT      = 6;
     private static final int SLOT_INFO           = 7;
     private static final int SLOT_END_TURN       = 8;
     private static final int SLOT_MAX_CUSTOM     = 8;
@@ -126,7 +128,11 @@ public class HotbarInputHandler implements PlayerPacketFilter {
         if (hud != null) hud.updatePanel(state, encounterManager, roleManager);
     }
 
-    // HUD stays permanent — always refresh to idle instead of hiding
+    // ── Public accessor for external classes (e.g. CreatureCommand) ───────────
+    public void refreshHudPublic(PlayerRef playerRef, GridPlayerState state) {
+        refreshHud(playerRef, state);
+    }
+
     private void hideHud(PlayerRef playerRef, GridPlayerState state) {
         refreshHud(playerRef, state);
     }
@@ -145,7 +151,6 @@ public class HotbarInputHandler implements PlayerPacketFilter {
             PlayerHotbarState hs = state.hotbarState;
             boolean isGM = DebugRoleWrapper.isGM(roleManager, playerRef);
 
-            // Pressing any key except 1 and 2 while in MOVE mode freezes the NPC
             if (slot != SLOT_CANCEL && slot != SLOT_MOVE
                     && hs.activeMode == PlayerHotbarState.Mode.MOVE
                     && !isGM
@@ -168,8 +173,12 @@ public class HotbarInputHandler implements PlayerPacketFilter {
                         CommandManager.get().handleCommand(playerRef, "CastCancel");
                         chat(playerRef, "#AAAAAA", "Cast cancelled.");
                     }
+                    if (state.statEditorPage != null) {
+                        state.statEditorPage.dismiss();
+                        state.statEditorPage = null;
+                        chat(playerRef, "#AAAAAA", "Stat editor closed (not saved).");
+                    }
                     state.freeze("key1");
-                    // Remove grid overlay if active
                     if (state.gridOverlayEnabled) {
                         GridOverlayManager.removeGridOverlay(world, state);
                     }
@@ -187,9 +196,8 @@ public class HotbarInputHandler implements PlayerPacketFilter {
                     refreshHud(playerRef, state);
                     break;
 
-                // ── Key 3: spell select + freeze NPC ─────────────────────────
+                // ── Key 3: spell select ───────────────────────────────────────
                 case SLOT_SPELL_SELECT: {
-                    // Always freeze NPC so player can walk around to aim freely
                     if (!isGM && state.npcEntity != null && state.npcEntity.isValid()) {
                         state.freeze("spell-select");
                     }
@@ -204,15 +212,13 @@ public class HotbarInputHandler implements PlayerPacketFilter {
                     break;
                 }
 
-                // ── Key 4: confirm + target merged ────────────────────────────
+                // ── Key 4: confirm + target ───────────────────────────────────
                 case SLOT_CONFIRM_TARGET: {
                     SpellCastingState cast = state.getSpellCastingState();
                     if (cast != null || state.hasActiveCustomCast()) {
-                        // Already casting — switch to targeting view
                         hs.spellConfirmed = true;
                         hs.setMode(PlayerHotbarState.Mode.CONFIRM_TARGET);
                     } else {
-                        // No active cast — confirm the selected spell
                         SpellData spell = hs.getSelectedSpell();
                         if (spell == null) {
                             chat(playerRef, "#FF0000", "No spell selected — use [3] first.");
@@ -237,19 +243,86 @@ public class HotbarInputHandler implements PlayerPacketFilter {
                     break;
                 }
 
-                // ── Keys 6, 7: empty ──────────────────────────────────────────
+                // ── Key 6: empty ──────────────────────────────────────────────
                 case 5:
-                case 6:
                     break;
 
-                // ── Key 8: info (profile + spell list, crouch swaps) ──────────
+                // ── Key 7: stat editor (open / cancel) ────────────────────────
+                case SLOT_STAT_EDIT: {
+                    if (hs.activeMode == PlayerHotbarState.Mode.STAT_EDIT) {
+                        // Second press — cancel without saving
+                        if (state.statEditorPage != null) {
+                            state.statEditorPage.dismiss();
+                            state.statEditorPage = null;
+                        }
+                        hs.setMode(PlayerHotbarState.Mode.NONE);
+                        refreshHud(playerRef, state);
+                        chat(playerRef, "#AAAAAA", "Stat editor cancelled.");
+                    } else {
+                        // First press — open editor
+                        MonsterState controlled = encounterManager.getControlledMonster();
+                        CharacterStats targetStats;
+                        String subjectName;
+                        if (isGM && controlled != null) {
+                            targetStats = controlled.stats;
+                            subjectName = controlled.getDisplayName();
+                        } else {
+                            if (state.stats == null) {
+                                chat(playerRef, "#FF0000", "No character stats — use /GridClass first.");
+                                break;
+                            }
+                            targetStats = state.stats;
+                            subjectName = targetStats.getClassType() != null
+                                    ? targetStats.getClassType().getDisplayName() : "Character";
+                        }
+                        if (state.statEditorPage != null) {
+                            state.statEditorPage.dismiss();
+                        }
+
+                        final boolean fIsGM = isGM;
+
+                        state.statEditorPage = new StatEditorPage(playerRef, targetStats, subjectName,
+                                // onSave
+                                () -> {
+                                    MonsterState ctrl = encounterManager.getControlledMonster();
+                                    if (fIsGM && ctrl != null) {
+                                        state.statEditorPage.applyTo(ctrl.stats);
+                                        chat(playerRef, "#00FF7F", "Saved: " + ctrl.getDisplayName());
+                                    } else {
+                                        state.statEditorPage.applyTo(state.stats);
+                                        chat(playerRef, "#00FF7F", "Stats saved.");
+                                    }
+                                    state.statEditorPage.dismiss();
+                                    state.statEditorPage = null;
+                                    hs.setMode(PlayerHotbarState.Mode.NONE);
+                                    refreshHud(playerRef, state);
+                                },
+                                // onCancel
+                                () -> {
+                                    state.statEditorPage.dismiss();
+                                    state.statEditorPage = null;
+                                    hs.setMode(PlayerHotbarState.Mode.NONE);
+                                    refreshHud(playerRef, state);
+                                    chat(playerRef, "#AAAAAA", "Stat editor cancelled.");
+                                }
+                        );
+
+                        state.statEditorPage.open();
+                        hs.setMode(PlayerHotbarState.Mode.STAT_EDIT);
+                        refreshHud(playerRef, state);
+                        chat(playerRef, "#FFD700", "Editing " + subjectName + " — use Save/Cancel buttons or crouch to save.");
+                    }
+                    break;
+                }
+
+                // ── Key 8: info ───────────────────────────────────────────────
                 case SLOT_INFO:
-                    hs.infoShowingProfile = true; // always open on profile
+                    hs.infoShowingProfile = true;
                     hs.setMode(PlayerHotbarState.Mode.INFO);
                     refreshHud(playerRef, state);
                     break;
 
-                // ── Key 9: arm end-turn confirm ───────────────────────────────
+                // ── Key 9: end turn confirm ───────────────────────────────────
                 case SLOT_END_TURN:
                     hs.setMode(PlayerHotbarState.Mode.END_TURN_CONFIRM);
                     refreshHud(playerRef, state);
@@ -271,7 +344,6 @@ public class HotbarInputHandler implements PlayerPacketFilter {
 
         switch (hs.activeMode) {
 
-            // Crouch in SPELL_SELECT: scroll
             case SPELL_SELECT:
                 world.execute(() -> {
                     hs.advanceSpellIndex();
@@ -279,9 +351,6 @@ public class HotbarInputHandler implements PlayerPacketFilter {
                 });
                 return true;
 
-            // Crouch in CONFIRM_TARGET:
-            //   Phase 1 (spellConfirmed=false) → fire /cast <spell>
-            //   Phase 2 (spellConfirmed=true)  → fire /casttarget
             case CONFIRM_TARGET:
                 world.execute(() -> {
                     if (!hs.spellConfirmed) {
@@ -299,7 +368,6 @@ public class HotbarInputHandler implements PlayerPacketFilter {
                 });
                 return true;
 
-            // Crouch in CAST_FINAL: fire /castfinal
             case CAST_FINAL:
                 world.execute(() -> {
                     CommandManager.get().handleCommand(playerRef, "CastFinal");
@@ -308,7 +376,14 @@ public class HotbarInputHandler implements PlayerPacketFilter {
                 });
                 return true;
 
-            // Crouch in INFO: swap profile ↔ spell/attack list
+            case STAT_EDIT:
+                world.execute(() -> {
+                    if (state.statEditorPage != null) {
+                        state.statEditorPage.triggerSave();
+                    }
+                });
+                return true;
+
             case INFO:
                 world.execute(() -> {
                     hs.infoShowingProfile = !hs.infoShowingProfile;
@@ -316,7 +391,6 @@ public class HotbarInputHandler implements PlayerPacketFilter {
                 });
                 return true;
 
-            // Crouch in END_TURN_CONFIRM: fire /endturn
             case END_TURN_CONFIRM:
                 world.execute(() -> {
                     CommandManager.get().handleCommand(playerRef, "endturn");
@@ -330,7 +404,7 @@ public class HotbarInputHandler implements PlayerPacketFilter {
         }
     }
 
-    // ── Player key-2: move + auto gridon ─────────────────────────────────────
+    // ── Player key-2: move ────────────────────────────────────────────────────
 
     private void handlePlayerMove(PlayerRef playerRef, GridPlayerState state, World world,
                                   Ref<EntityStore> entityRef, Store<EntityStore> store) {
@@ -361,7 +435,6 @@ public class HotbarInputHandler implements PlayerPacketFilter {
             return;
         }
 
-        // Crossbow guard
         try {
             Player pc = store.getComponent(entityRef, Player.getComponentType());
             if (pc != null) {
@@ -415,12 +488,10 @@ public class HotbarInputHandler implements PlayerPacketFilter {
         });
     }
 
-    // ── GM key-2: move + auto gridon ─────────────────────────────────────────
+    // ── GM key-2: move ────────────────────────────────────────────────────────
 
     private void handleGmMove(PlayerRef playerRef, GridPlayerState state, World world,
                               Ref<EntityStore> entityRef, Store<EntityStore> store) {
-        // Read GM's actual world position fresh — state.currentGridX/Z may be
-        // stale (last set to controlled monster's position on previous key2 press)
         Vector3d pos = getPosition(entityRef, store);
         int gmX = state.currentGridX;
         int gmZ = state.currentGridZ;
@@ -429,7 +500,6 @@ public class HotbarInputHandler implements PlayerPacketFilter {
             gmZ = (int) Math.floor(pos.getZ() / 2.0);
         }
 
-        // Update GM state to actual position so future lookups are correct
         state.currentGridX = gmX;
         state.currentGridZ = gmZ;
         if (pos != null) state.npcY = (float) pos.getY();
@@ -480,7 +550,7 @@ public class HotbarInputHandler implements PlayerPacketFilter {
         }
     }
 
-    // ── Chat helper ───────────────────────────────────────────────────────────
+    // ── Helpers ───────────────────────────────────────────────────────────────
 
     private static void chat(PlayerRef playerRef, String hexColor, String text) {
         playerRef.sendMessage(Message.raw(text).color(hexColor));
@@ -489,8 +559,6 @@ public class HotbarInputHandler implements PlayerPacketFilter {
     public void onPlayerDisconnect(PlayerRef playerRef) {
         wasSneaking.remove(playerRef.getUuid());
     }
-
-    // ── Utilities ─────────────────────────────────────────────────────────────
 
     private static void resyncSlot(PlayerRef playerRef, int slot) {
         SetActiveSlot packet = new SetActiveSlot();

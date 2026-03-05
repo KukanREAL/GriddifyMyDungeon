@@ -1,0 +1,118 @@
+@HudBg = PatchStyle(TexturePath: "HudBackground.png");
+
+Group {
+  LayoutMode: Center;
+  Anchor: (Full: 0);
+
+  Group #StatEditorPanel {
+    LayoutMode: Top;
+    Anchor: (Width: 560, Height: 520);
+    Padding: (Left: 80, Right: 16, Top: 10, Bottom: 10);
+    Background: @HudBg;
+
+    Label #Title {
+      Style: (FontSize: 24);
+      Anchor: (Height: 28, Bottom: 4, Left: 0, Top: 14);
+      Text: "EDIT STATS";
+    }
+
+    Group #RowStr {
+      LayoutMode: Left;
+      Anchor: (Height: 28, Bottom: 2);
+      Label { Style: (FontSize: 18); Anchor: (Width: 220, Height: 28); Text: "Strength"; }
+      TextField #FieldStr { Anchor: (Width: 160, Height: 28); Padding: (Full: 4); }
+    }
+
+    Group #RowDex {
+      LayoutMode: Left;
+      Anchor: (Height: 28, Bottom: 2);
+      Label { Style: (FontSize: 18); Anchor: (Width: 220, Height: 28); Text: "Dexterity"; }
+      TextField #FieldDex { Anchor: (Width: 160, Height: 28); Padding: (Full: 4); }
+    }
+
+    Group #RowCon {
+      LayoutMode: Left;
+      Anchor: (Height: 28, Bottom: 2);
+      Label { Style: (FontSize: 18); Anchor: (Width: 220, Height: 28); Text: "Constitution"; }
+      TextField #FieldCon { Anchor: (Width: 160, Height: 28); Padding: (Full: 4); }
+    }
+
+    Group #RowInt {
+      LayoutMode: Left;
+      Anchor: (Height: 28, Bottom: 2);
+      Label { Style: (FontSize: 18); Anchor: (Width: 220, Height: 28); Text: "Intelligence"; }
+      TextField #FieldInt { Anchor: (Width: 160, Height: 28); Padding: (Full: 4); }
+    }
+
+    Group #RowWis {
+      LayoutMode: Left;
+      Anchor: (Height: 28, Bottom: 2);
+      Label { Style: (FontSize: 18); Anchor: (Width: 220, Height: 28); Text: "Wisdom"; }
+      TextField #FieldWis { Anchor: (Width: 160, Height: 28); Padding: (Full: 4); }
+    }
+
+    Group #RowCha {
+      LayoutMode: Left;
+      Anchor: (Height: 28, Bottom: 2);
+      Label { Style: (FontSize: 18); Anchor: (Width: 220, Height: 28); Text: "Charisma"; }
+      TextField #FieldCha { Anchor: (Width: 160, Height: 28); Padding: (Full: 4); }
+    }
+
+    Group #RowHP {
+      LayoutMode: Left;
+      Anchor: (Height: 28, Bottom: 2);
+      Label { Style: (FontSize: 18); Anchor: (Width: 220, Height: 28); Text: "Current HP"; }
+      TextField #FieldHP { Anchor: (Width: 160, Height: 28); Padding: (Full: 4); }
+    }
+
+    Group #RowMaxHP {
+      LayoutMode: Left;
+      Anchor: (Height: 28, Bottom: 2);
+      Label { Style: (FontSize: 18); Anchor: (Width: 220, Height: 28); Text: "Max HP"; }
+      TextField #FieldMaxHP { Anchor: (Width: 160, Height: 28); Padding: (Full: 4); }
+    }
+
+    Group #RowArmor {
+      LayoutMode: Left;
+      Anchor: (Height: 28, Bottom: 2);
+      Label { Style: (FontSize: 18); Anchor: (Width: 220, Height: 28); Text: "Armor Class"; }
+      TextField #FieldArmor { Anchor: (Width: 160, Height: 28); Padding: (Full: 4); }
+    }
+
+    Group #RowInit {
+      LayoutMode: Left;
+      Anchor: (Height: 28, Bottom: 2);
+      Label { Style: (FontSize: 18); Anchor: (Width: 220, Height: 28); Text: "Initiative"; }
+      TextField #FieldInit { Anchor: (Width: 160, Height: 28); Padding: (Full: 4); }
+    }
+
+    Group #RowLevel {
+      LayoutMode: Left;
+      Anchor: (Height: 28, Bottom: 2);
+      Label { Style: (FontSize: 18); Anchor: (Width: 220, Height: 28); Text: "Level"; }
+      TextField #FieldLevel { Anchor: (Width: 160, Height: 28); Padding: (Full: 4); }
+    }
+
+    Group #RowSlots {
+      LayoutMode: Left;
+      Anchor: (Height: 28, Bottom: 2);
+      Label { Style: (FontSize: 18); Anchor: (Width: 220, Height: 28); Text: "Spell Slots"; }
+      TextField #FieldSlots { Anchor: (Width: 160, Height: 28); Padding: (Full: 4); }
+    }
+
+    Group #RowButtons {
+      LayoutMode: Left;
+      Anchor: (Height: 34, Top: 8);
+      TextButton #BtnSave {
+        Anchor: (Width: 180, Height: 30);
+        Padding: (Full: 6);
+        Text: "Save";
+      }
+      TextButton #BtnCancel {
+        Anchor: (Width: 180, Height: 30, Left: 12);
+        Padding: (Full: 6);
+        Text: "Cancel";
+      }
+    }
+  }
+}

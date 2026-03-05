@@ -13,6 +13,7 @@ public class PlayerHotbarState {
         SPELL_SELECT,
         CONFIRM_TARGET,  // key 4: first crouch = /cast, subsequent crouch = /casttarget
         CAST_FINAL,      // key 5
+        STAT_EDIT,     // key 7: stat editor
         INFO,            // key 8: profile + spell list, crouch swaps
         END_TURN_CONFIRM // key 9
     }
