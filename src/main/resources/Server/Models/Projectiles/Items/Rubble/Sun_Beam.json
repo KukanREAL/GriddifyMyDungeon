@@ -1,0 +1,64 @@
+{
+  "Model": "Items/Empty.blockymodel",
+  "Texture": "Items/Empty.png",
+  "HitBox": {
+    "Max": {
+      "X": 0.15,
+      "Y": 0.15,
+      "Z": 0.15
+    },
+    "Min": {
+      "X": -0.15,
+      "Y": -0.15,
+      "Z": -0.15
+    }
+  },
+  "MinScale": 1,
+  "MaxScale": 1,
+  "Trails": [
+    {
+      "TrailId": {
+        "TexturePath": "Trails/Distortion_Dagger.png",
+        "Start": {
+          "Width": 1
+        },
+        "End": {
+          "Width": 1
+        },
+        "RenderMode": "Distortion",
+        "LifeSpan": 20
+      },
+      "RotationOffset": {
+        "Pitch": 90
+      }
+    },
+    {
+      "TrailId": {
+        "TexturePath": "Trails/White.png",
+        "Start": {
+          "Width": 0.2,
+          "Color": "#efdc62ff"
+        },
+        "End": {
+          "Width": 0.2,
+          "Color": "#e58f0bff"
+        },
+        "LifeSpan": 60
+      },
+      "RotationOffset": {
+        "Pitch": 90,
+        "Yaw": 90
+      }
+    }
+  ],
+  "Particles": [
+    {
+      "SystemId": "Example_Sparks_Directional",
+      "Color": "#dfdb58",
+      "PositionOffset": {
+        "Y": 0
+      },
+      "Scale": 0.2
+    }
+  ]
+}
