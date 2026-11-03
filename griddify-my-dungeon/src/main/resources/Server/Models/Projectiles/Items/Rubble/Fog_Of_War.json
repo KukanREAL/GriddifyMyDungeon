@@ -1,0 +1,17 @@
+{
+  "Model": "Items/Fog_Of_War.blockymodel",
+  "Texture": "Items/FogOfWar.png",
+  "HitBox": {
+    "Max": {
+      "X": 0.15,
+      "Y": 0.15,
+      "Z": 0.15
+    },
+    "Min": {
+      "X": -0.15,
+      "Y": -0.15,
+      "Z": -0.15
+    }
+  },
+  "Trails": []
+}

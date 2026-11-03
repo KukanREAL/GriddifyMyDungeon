@@ -1,0 +1,246 @@
+package com.griddifymydungeon.plugin.gridmove;
+
+import com.griddifymydungeon.plugin.gridmove.commands.*;
+import com.griddifymydungeon.plugin.gridmove.packet.PlayerPositionTracker;
+import com.griddifymydungeon.plugin.spell.SpellVisualManager;
+import com.griddifymydungeon.plugin.spell.*;
+import com.griddifymydungeon.plugin.vtt.*;
+import com.griddifymydungeon.plugin.vtt.commands.*;
+import com.hypixel.hytale.event.EventPriority;
+import com.hypixel.hytale.event.EventRegistration;
+import com.hypixel.hytale.protocol.packets.player.ClientMovement;
+import com.hypixel.hytale.server.core.event.events.player.PlayerDisconnectEvent;
+import com.hypixel.hytale.server.core.io.adapter.PacketAdapters;
+import com.hypixel.hytale.server.core.io.adapter.PacketFilter;
+import com.hypixel.hytale.server.core.io.adapter.PacketWatcher;
+import com.hypixel.hytale.server.core.io.handlers.game.GamePacketHandler;
+import com.hypixel.hytale.server.core.plugin.JavaPlugin;
+import com.hypixel.hytale.server.core.plugin.JavaPluginInit;
+
+import javax.annotation.Nonnull;
+import java.util.logging.Level;
+
+
+public class GridMovePlugin extends JavaPlugin {
+
+    public static final String VERSION = "0.3.2";
+
+    // Managers
+    private GridMoveManager gridMoveManager;
+    private RoleManager roleManager;
+    private EncounterManager encounterManager;
+    private CombatManager combatManager;
+    private CombatSettings combatSettings;
+    private PlayerDataManager playerDataManager;
+    private CollisionDetector collisionDetector;
+
+    // Trackers
+    private PlayerPositionTracker positionTracker;
+    private GMPositionTracker gmPositionTracker;
+
+    // Handlers
+    private ClientMovementHandler movementHandler;
+    private HotbarInputHandler hotbarInputHandler;
+    private PacketFilter hotbarPacketFilter;
+
+    // Listeners
+    private PlayerDisconnectListener disconnectListener;
+
+    // Event registrations
+    private EventRegistration<Void, PlayerDisconnectEvent> disconnectRegistration;
+
+    public GridMovePlugin(@Nonnull JavaPluginInit init) {
+        super(init);
+    }
+
+    @Override
+    public void setup() {
+        getLogger().at(Level.INFO).log("Setting up GridMove v%s", VERSION);
+
+        // Initialize managers
+        this.gridMoveManager = new GridMoveManager();
+        this.roleManager = new RoleManager();
+        this.encounterManager = new EncounterManager(roleManager);
+        this.combatSettings = new CombatSettings();
+        this.combatManager = new CombatManager(gridMoveManager, encounterManager, roleManager);
+        this.playerDataManager = new PlayerDataManager(this.getDataDirectory().toFile());
+        this.collisionDetector = new CollisionDetector(gridMoveManager, encounterManager);
+
+        // Initialize trackers
+        this.positionTracker = new PlayerPositionTracker(
+                gridMoveManager, roleManager, encounterManager, combatManager, collisionDetector);
+        this.gmPositionTracker = new GMPositionTracker(
+                encounterManager, roleManager, combatManager, collisionDetector, gridMoveManager);
+
+        // Initialize movement handler
+        this.movementHandler = new ClientMovementHandler(positionTracker, gmPositionTracker, roleManager, gridMoveManager);
+
+        // Initialize listeners
+        this.disconnectListener = new PlayerDisconnectListener(gridMoveManager, roleManager);
+
+        // Register event listeners
+        this.disconnectRegistration = this.getEventRegistry().register(
+                EventPriority.NORMAL,
+                PlayerDisconnectEvent.class,
+                event -> this.disconnectListener.onPlayerDisconnect(event)
+        );
+
+        // Register packet handlers
+        registerPacketHandlers();
+
+        // Register commands
+        registerCommands();
+
+        getLogger().at(Level.INFO).log("GridMove v%s setup complete!", VERSION);
+    }
+
+    @Override
+    public void shutdown() {
+        getLogger().at(Level.INFO).log("Shutting down GridMove v%s", VERSION);
+
+        if (this.disconnectRegistration != null) {
+            this.disconnectRegistration.unregister();
+        }
+        if (hotbarPacketFilter != null) {
+            PacketAdapters.deregisterInbound(hotbarPacketFilter);
+        }
+
+        getLogger().at(Level.INFO).log("GridMove v%s shutdown complete!", VERSION);
+    }
+
+    private void registerPacketHandlers() {
+        PacketAdapters.registerInbound((PacketWatcher) (handler, packet) -> {
+            if (packet instanceof ClientMovement && handler instanceof GamePacketHandler) {
+                try {
+                    GamePacketHandler gameHandler = (GamePacketHandler) handler;
+                    movementHandler.handleMovement(
+                            gameHandler.getPlayerRef(),
+                            (ClientMovement) packet
+                    );
+                } catch (Exception e) {
+                    getLogger().at(Level.WARNING)
+                            .log("Error handling ClientMovement: " + e.getMessage());
+                }
+            }
+        });
+
+        getLogger().at(Level.INFO).log("Registered ClientMovement packet handler");
+    }
+
+    private void registerCommands() {
+        // Role commands
+        GMCommand gmCmd = new GMCommand(roleManager);
+        GridPlayerCommand gridPlayerCmd = new GridPlayerCommand(roleManager);
+        getCommandRegistry().registerCommand(gmCmd);
+        getCommandRegistry().registerCommand(gridPlayerCmd);
+        getCommandRegistry().registerCommand(new GridNullCommand(roleManager));
+        getCommandRegistry().registerCommand(new GridRestartCommand(roleManager));
+
+        // Declared early — both needed before EndTurnCommand
+        CombatCommand combatCommand = new CombatCommand(roleManager, combatManager, gridMoveManager);
+        FogOfWarCommand fogOfWarCommand =
+                new FogOfWarCommand(gridMoveManager, roleManager);
+        combatCommand.setFogOfWarCommand(fogOfWarCommand);
+        SpellVisualManager spellVisualManager = new SpellVisualManager(gridMoveManager);
+        positionTracker.setSpellVisualManager(spellVisualManager);
+        gmPositionTracker.setSpellVisualManager(spellVisualManager);
+
+        // Player commands
+        getCommandRegistry().registerCommand(new GridMoveCommand(gridMoveManager, collisionDetector, roleManager));
+        getCommandRegistry().registerCommand(new MaxTurnsCommand(gridMoveManager));
+        getCommandRegistry().registerCommand(new EndTurnCommand(
+                gridMoveManager, combatManager, combatCommand, collisionDetector,
+                encounterManager, spellVisualManager
+        ));
+        getCommandRegistry().registerCommand(new GridCamCommand());
+        getCommandRegistry().registerCommand(new ClearHologramsCommand(gridMoveManager));
+        getCommandRegistry().registerCommand(new GridOnCommand(gridMoveManager, collisionDetector, encounterManager, roleManager));
+        getCommandRegistry().registerCommand(new GridOffCommand(gridMoveManager));
+        getCommandRegistry().registerCommand(new GridToggleCommand(gridMoveManager, collisionDetector, encounterManager, roleManager));
+
+        // GM commands (excluding CreatureCommand — registered after hotbarInputHandler is built)
+        getCommandRegistry().registerCommand(new ControlCommand(roleManager, encounterManager, gridMoveManager));
+        getCommandRegistry().registerCommand(new SlainCommand(encounterManager, roleManager));
+
+        // Stat commands
+        getCommandRegistry().registerCommand(new STRCommand(gridMoveManager, roleManager, encounterManager));
+        getCommandRegistry().registerCommand(new DEXCommand(gridMoveManager, roleManager, encounterManager));
+        getCommandRegistry().registerCommand(new CONCommand(gridMoveManager, roleManager, encounterManager));
+        getCommandRegistry().registerCommand(new INTCommand(gridMoveManager, roleManager, encounterManager));
+        getCommandRegistry().registerCommand(new WISCommand(gridMoveManager, roleManager, encounterManager));
+        getCommandRegistry().registerCommand(new CHACommand(gridMoveManager, roleManager, encounterManager));
+        getCommandRegistry().registerCommand(new HPCommand(gridMoveManager, roleManager, encounterManager));
+        getCommandRegistry().registerCommand(new ArmorCommand(gridMoveManager, roleManager, encounterManager));
+        getCommandRegistry().registerCommand(new InitiativeCommand(gridMoveManager, roleManager, encounterManager));
+        getCommandRegistry().registerCommand(new FlyingCommand(gridMoveManager, roleManager, encounterManager));
+
+        // Character code system
+        getCommandRegistry().registerCommand(new GridRegisterCommand(gridMoveManager, roleManager));
+        getCommandRegistry().registerCommand(new GridLoginCommand(gridMoveManager, roleManager));
+        getCommandRegistry().registerCommand(new GridProfileCommand(gridMoveManager, roleManager));
+
+        // Dice commands
+        getCommandRegistry().registerCommand(new DiceCommand(combatSettings));
+        getCommandRegistry().registerCommand(new AdDiceCommand(combatSettings));
+        getCommandRegistry().registerCommand(new DisDiceCommand(combatSettings));
+
+        // Combat commands
+        getCommandRegistry().registerCommand(new InitivCommand(roleManager, combatManager));
+        getCommandRegistry().registerCommand(combatCommand);
+        getCommandRegistry().registerCommand(new CriticalCommand(roleManager, combatSettings));
+
+        // Preset commands
+        getCommandRegistry().registerCommand(new GridClassesCommand());
+
+        // Level commands
+        getCommandRegistry().registerCommand(new LevelUpCommand(gridMoveManager, roleManager));
+        getCommandRegistry().registerCommand(new LevelDownCommand(gridMoveManager, roleManager));
+
+        // Class selection commands
+        getCommandRegistry().registerCommand(new GridClassCommand(gridMoveManager, roleManager, encounterManager));
+        getCommandRegistry().registerCommand(new GridSubclassCommand(gridMoveManager));
+        getCommandRegistry().registerCommand(new GridSubclassesCommand(gridMoveManager));
+
+        // Spell casting commands
+        PersistentSpellManager persistentSpellManager = new PersistentSpellManager();
+        WildShapeManager wildShapeManager =
+                new WildShapeManager(gridMoveManager);
+        PolymorphManager polymorphManager =
+                new PolymorphManager(gridMoveManager, encounterManager);
+        getCommandRegistry().registerCommand(new ListSpellsCommand(gridMoveManager, roleManager, encounterManager));
+        getCommandRegistry().registerCommand(new CastCommand(gridMoveManager, encounterManager, spellVisualManager, roleManager, collisionDetector));
+        getCommandRegistry().registerCommand(new CastTargetCommand(gridMoveManager, spellVisualManager));
+        getCommandRegistry().registerCommand(new CastFinalCommand(gridMoveManager, encounterManager, spellVisualManager, combatSettings, roleManager));
+        getCommandRegistry().registerCommand(new CastCancelCommand(gridMoveManager, spellVisualManager, encounterManager, roleManager));
+        getCommandRegistry().registerCommand(new OrbCommand(gridMoveManager));
+        getCommandRegistry().registerCommand(new PolyformCommand(gridMoveManager, encounterManager, polymorphManager));
+        getCommandRegistry().registerCommand(new PolyrevertCommand(encounterManager, polymorphManager));
+
+        // Help command
+        getCommandRegistry().registerCommand(new GridWeatherCommand(roleManager));
+        getCommandRegistry().registerCommand(fogOfWarCommand);
+        getCommandRegistry().registerCommand(new GridHelpCommand(roleManager));
+
+        // Build and register hotbar input handler (needs spellVisualManager, built above)
+        this.hotbarInputHandler = new HotbarInputHandler(
+                gridMoveManager, encounterManager, spellVisualManager, roleManager, collisionDetector);
+        hotbarPacketFilter = PacketAdapters.registerInbound(hotbarInputHandler);
+        disconnectListener.setHotbarInputHandler(hotbarInputHandler);
+        gmCmd.setHotbarInputHandler(hotbarInputHandler);
+        gridPlayerCmd.setHotbarInputHandler(hotbarInputHandler);
+
+        // CreatureCommand registered here so hotbarInputHandler is guaranteed non-null
+        getCommandRegistry().registerCommand(new CreatureCommand(
+                encounterManager, roleManager, collisionDetector, gridMoveManager, hotbarInputHandler));
+
+        getLogger().at(Level.INFO).log("Registered all commands successfully!");
+    }
+
+    // Getters
+    public GridMoveManager getGridMoveManager() { return gridMoveManager; }
+    public RoleManager getRoleManager() { return roleManager; }
+    public EncounterManager getEncounterManager() { return encounterManager; }
+    public CombatManager getCombatManager() { return combatManager; }
+    public CombatSettings getCombatSettings() { return combatSettings; }
+    public PlayerDataManager getPlayerDataManager() { return playerDataManager; }
+}

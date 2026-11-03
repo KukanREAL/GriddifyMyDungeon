@@ -1,0 +1,45 @@
+{
+  "Model": "Items/Fire_Bolt.blockymodel",
+  "Texture": "Items/Electric_Spell.png",
+  "HitBox": {
+    "Max": {
+      "X": 0.15,
+      "Y": 0.15,
+      "Z": 0.15
+    },
+    "Min": {
+      "X": -0.15,
+      "Y": -0.15,
+      "Z": -0.15
+    }
+  },
+  "MinScale": 1,
+  "MaxScale": 1,
+  "Trails": [
+    {
+      "TrailId": {
+        "TexturePath": "Trails/Wind.png",
+        "LifeSpan": 10,
+        "Roll": 90,
+        "Start": {
+          "Width": 0.2,
+          "Color": "#1758d9ff"
+        },
+        "End": {
+          "Width": 0.03,
+          "Color": "#f9de80ff"
+        },
+        "RenderMode": "Erosion"
+      }
+    }
+  ],
+  "Particles": [
+    {
+      "SystemId": "Rain_Heavy",
+      "Scale": 0.22,
+      "PositionOffset": {
+        "Y": -1
+      }
+    }
+  ]
+}
